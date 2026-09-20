@@ -1,4 +1,5 @@
 import {CONFIG} from './config.js';
+const BUILD_ID='CA-0920-01';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null;
@@ -26,7 +27,7 @@ function roadEdges(){let h='';for(let r=0;r<CONFIG.height;r++)for(let c=0;c<CONF
 function render(){
  const p=players[setupDraft?draftOrder[draftPick]:turn];
  document.querySelector('#app').innerHTML=`
- <header><div><h1>Civic Arbitrage</h1><p>Playas de México · v0.1 prototype</p></div><div class="turn"><span class="playerdisc p${p.i}"></span><b>${p.name}</b> · <strong>${setupDraft?`Starting draft — pick ${draftPick+1}/8`:`${actions}/2 actions`}</strong></div></header>
+ <header><div><h1>Civic Arbitrage</h1><p>Playas de México · v0.1 prototype · <b>Build ${BUILD_ID}</b></p></div><div class="turn"><span class="playerdisc p${p.i}"></span><b>${p.name}</b> · <strong>${setupDraft?`Starting draft — pick ${draftPick+1}/8`:`${actions}/2 actions`}</strong></div></header>
  <div class="actionbar ${setupDraft?'disabled':''}">${[['acquire','Acquire'],['sell','Sell'],['road','Build Road'],['zone','Zone / Rezone'],['building','Take Building']].map(([m,l])=>`<button class="${mode===m?'active':''}" data-mode="${m}">${l}</button>`).join('')}<button id="undo" class="undo" ${history.length?'':'disabled'}>↶ Undo</button></div>
  <main><section><div class="boardwrap"><div class="board">${parcels.map(x=>`<button class="parcel ${x.zone} ${x.water?'water':''} ${x.municipal?'civic':''} ${selected===x.id?'selected':''} ${pendingBuilding!==null&&legalBuild(x,market[pendingBuilding])?'legalbuild':''}" data-id="${x.id}"><span>${x.id}</span>${x.building?`<b class="building">${x.building}</b>`:''}${Number.isInteger(x.owner)?`<i class="ownerdisc p${x.owner}"></i>`:''}${x.density?`<em>${'●'.repeat(x.density)}</em>`:''}<small>$${value(x)}</small></button>`).join('')}</div>${!setupDraft?roadEdges():''}</div>
  <div class="sea">COAST — prototype geography</div>
