@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-09';
+const BUILD_ID='CA-0920-10';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null;
@@ -13,7 +13,11 @@ seed(6,5,'residential','Surf Shack'); // directly south of Plaza on the coast
 ['H:1:5','H:2:5','V:1:5','V:1:6'].forEach(k=>roads.add(k));
 
 const defs=[['Casa','residential',1],['Café','commercial',1],['Casa','residential',1],['Apartamentos','residential',2],['Tiendas','commercial',2],['Café','commercial',1],['Casa','residential',1],['Hotel','commercial',3],['Apartamentos','residential',2],['Tiendas','commercial',2]];
+let nextCardId=defs.length;
+function makeCard(d){return {id:nextCardId++,name:d[0],use:d[1],density:d[2],coins:0}}
 let market=defs.map((d,i)=>({id:i,name:d[0],use:d[1],density:d[2],coins:0}));
+function refillDef(){return defs[Math.floor(Math.random()*defs.length)]}
+function refreshMarket(){for(const start of [0,5]){const row=market.slice(start,start+5),kept=row.filter(Boolean);while(kept.length<5)kept.push(makeCard(refillDef()));for(let j=0;j<5;j++)market[start+j]=kept[j]}}
 
 function at(r,c){return parcels.find(x=>x.r===r&&x.c===c)}
 function value(p){let v=p.density;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(p.r+dr,p.c+dc);if(n)v+=n.density});if(p.water)v+=p.density;return v}
@@ -32,7 +36,7 @@ function render(){
  <div class="actionbar ${setupDraft?'disabled':''}">${[['acquire','Acquire'],['sell','Sell'],['road','Build Road'],['zone','Zone / Rezone'],['building','Take Building']].map(([m,l])=>`<button class="${mode===m?'active':''}" data-mode="${m}">${l}</button>`).join('')}<button id="undo" class="undo" ${history.length?'':'disabled'}>↶ Undo</button></div>
  <main><section><div class="boardwrap"><div class="board">${parcels.map(x=>`<button class="parcel ${x.zone} ${x.water?'water':''} ${x.municipal?'civic':''} ${selected===x.id?'selected':''} ${pendingBuilding!==null&&legalBuild(x,market[pendingBuilding])?'legalbuild':''}" data-id="${x.id}"><span>${x.id}</span>${x.building?`<b class="building">${x.building}</b>`:''}${Number.isInteger(x.owner)?`<i class="ownerdisc p${x.owner}"></i>`:''}${x.density?`<em>${'●'.repeat(x.density)}</em>`:''}<small>${value(x)}</small>${!setupDraft?parcelEdges(x):''}</button>`).join('')}</div></div>
  <div class="sea">COAST — prototype geography</div>
- <div class="market"><h2>Building Market</h2>${[0,1].map(row=>`<div class="marketrow">${market.slice(row*5,row*5+5).map((c,j)=>`<button class="card" data-card="${row*5+j}"><b>${c.name}</b><span>${c.use}</span><strong>${'●'.repeat(c.density)}</strong><small>Subsidy $${c.coins} · Skip $${j}</small></button>`).join('')}</div>`).join('')}<div class="municipal-staging">Municipal staging — empty</div></div></section>
+ <div class="market"><h2>Building Market</h2>${[0,1].map(row=>`<div class="marketrow">${market.slice(row*5,row*5+5).map((c,j)=>c?`<button class="card" data-card="${row*5+j}"><b>${c.name}</b><span>${c.use}</span><strong>${'●'.repeat(c.density)}</strong><small>Subsidy ${c.coins} · Skip ${j}</small></button>`:`<div class="card card-empty" aria-label="Empty market slot"></div>`).join('')}</div>`).join('')}<div class="municipal-staging">Municipal staging — empty</div></div></section>
  <aside><h2><span class="playerdisc p${p.i}"></span>${p.name}</h2><div class="money">Hidden cash: $<b>${p.cash}</b></div><p>Tokens available: ${p.tokens}</p><h3>${setupDraft?'Starting parcel draft':'Action: '+modeLabel()}</h3><p>${setupDraft?'Choose any parcel except Municipal land. Existing private buildings may be acquired; pay $0 during the starting draft.':help()}</p>${mode==='zone'&&selected?zoneControls():''}${pendingBuilding?buildingControls():''}${actions<=0&&!setupDraft?'<div class="noactions"><b>No more actions.</b> End your turn.</div>':''}<button id="end" ${setupDraft?'disabled':''}>${actions<=0?'End Turn':'End turn early'}</button><hr><h3>Growth</h3><p>Population ${population} / Jobs ${jobs}</p><p>Thresholds: 4 → 9 → 15</p></aside></main>`;
  document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));document.querySelectorAll('.parcel').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();parcelClick(el.dataset.id)}));document.querySelectorAll('.card').forEach(e=>e.onclick=()=>takeCard(+e.dataset.card));document.querySelectorAll('[data-edge]').forEach(e=>e.onclick=ev=>{ev.stopPropagation();buildRoad(e.dataset.edge)});document.querySelectorAll('[data-zone]').forEach(e=>e.onclick=()=>applyZone(e.dataset.zone,+e.dataset.density));document.querySelectorAll('[data-buildchoice]').forEach(e=>e.onclick=()=>buildingChoice(e.dataset.buildchoice));document.querySelector('#end').onclick=endTurn;document.querySelector('#undo').onclick=undo;
 }
@@ -53,8 +57,8 @@ function buildRoad(key){if(mode!=='road'||setupDraft||actions<=0||roads.has(key)
 function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
 function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;const yes=councilOdds(x,use,density),bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}const draw=bag.slice(0,7).reduce((a,b)=>a+b,0);if(draw>=4){snap();x.zone=use;x.density=density;alert(`Council PASSED: ${draw} Yes / ${7-draw} No\nBag: ${yes} Yes / ${12-yes} No`);spendAction();selected=null;render()}else alert(`Council FAILED: ${draw} Yes / ${7-draw} No\nBag: ${yes} Yes / ${12-yes} No\nPaid redraw UI comes next.`)}
 function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
-function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)market[j].coins++;p.cash-=pos;p.cash+=c.coins;return c}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
 function placeBuilding(x){const i=pendingBuilding,c=commitMarket(i),p=players[turn];if(x.building)x.building=null;x.building=c.name;p.cash+=CONFIG.buildPayout;if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;c.coins=0;pendingBuilding=null;spendAction();render()}
 function buildingChoice(choice){if(pendingBuilding===null)return;if(choice==='cancel'){pendingBuilding=null;render();return}if(choice==='discard'){const i=pendingBuilding,c=commitMarket(i);c.coins=0;pendingBuilding=null;spendAction();render()}}
-function endTurn(){if(setupDraft)return;snap();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;render()}
+function endTurn(){if(setupDraft)return;snap();refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;render()}
 render();
