@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-04';
+const BUILD_ID='CA-0920-05';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null;
