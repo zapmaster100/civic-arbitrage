@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-41';
+const BUILD_ID='CA-0920-42';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -29,7 +29,7 @@ function restore(raw){const q=JSON.parse(raw);players.splice(0,players.length,..
 function snap(){try{history.push(state())}catch(e){console.error('Snapshot failed',e)}}
 function undo(){if(actionStart){restore(actionStart);actionStart=null;if(history.length)history.pop();render();return}if(!history.length)return;restore(history.pop());render()}
 function spendAction(){actions--}
-function setMode(m){if(setupDraft||actions<=0)return;if(m!=='building'&&!selected)return;actionStart=null;mode=m;selected=null;pendingBuilding=null;pendingCouncil=null;roadSegments=0;render()}
+function setMode(m){if(setupDraft||actions<=0)return;actionStart=null;mode=m;selected=null;pendingBuilding=null;pendingCouncil=null;roadSegments=0;render()}
 function edgeKey(r,c,side){if(side==='N')return 'H:'+r+':'+c;if(side==='S')return 'H:'+(r+1)+':'+c;if(side==='W')return 'V:'+r+':'+c;return 'V:'+r+':'+(c+1)}
 function edgeConnected(key){if(!roads.size)return true;const [o,a,b]=key.split(':'),r=+a,c=+b;const ends=o==='H'?[[r,c],[r,c+1]]:[[r,c],[r+1,c]];for(const k of roads){const [oo,aa,bb]=k.split(':'),rr=+aa,cc=+bb;const ee=oo==='H'?[[rr,cc],[rr,cc+1]]:[[rr,cc],[rr+1,cc]];if(ends.some(e=>ee.some(q=>q[0]===e[0]&&q[1]===e[1])))return true}return false}
 function parcelEdges(x){return ['N','W',...(x.r===CONFIG.height-1?['S']:[]),...(x.c===CONFIG.width-1?['E']:[])].map(side=>{const key=edgeKey(x.r,x.c,side),built=roads.has(key);return `<span class="parcelroad ${side} ${built?'built':mode==='road'?'available':'hiddenedge'}" data-edge="${key}" title="${built?'Road':'Build road'}"></span>`}).join('')}
@@ -38,24 +38,12 @@ function render(){
  const p=players[draftPlayer];
  document.querySelector('#app').innerHTML=`
  <header><div><h1>Civic Arbitrage</h1><p>Playas de México · v0.1 prototype · <b>Build ${BUILD_ID}</b></p></div><div class="turn"><span class="playerdisc p${p.i}"></span><b>${p.name}</b> · <strong>${setupDraft?`Starting draft — pick ${draftPick+1}/8`:`${actions}/2 actions`}</strong></div></header>
- <div class="actionbar ${setupDraft?'disabled':''}">${[['acquire','Acquire'],['sell','Sell'],['road','Build Road'],['zone','Zone / Rezone'],['building','Take Building']].map(([m,l])=>`<button class="${mode===m?'active':''}" data-mode="${m}" ${!selected&&m!=='building'?'disabled':''}>${l}</button>`).join('')}<button id="undo" class="undo" ${history.length?'':'disabled'}>↶ Undo</button></div>
+ <div class="actionbar ${setupDraft?'disabled':''}">${[['acquire','Acquire'],['sell','Sell'],['road','Build Road'],['zone','Zone / Rezone'],['building','Take Building']].map(([m,l])=>`<button class="${mode===m?'active':''}" data-mode="${m}" >${l}</button>`).join('')}<button id="undo" class="undo" ${history.length?'':'disabled'}>↶ Undo</button></div>
  <main><section><div class="boardwrap"><div class="board">${parcels.map(x=>`<button class="parcel ${x.zone} ${x.water?'water':''} ${x.municipal?'civic':''} ${selected===x.id?'selected':''} ${pendingBuilding!==null&&legalBuild(x,market[pendingBuilding])?'legalbuild':''}" data-id="${x.id}"><span>${x.id}</span>${x.building?`<b class="building">${x.building}</b>`:''}${Number.isInteger(x.owner)?`<i class="ownerdisc p${x.owner}"></i>`:''}${x.density?`<em>${'●'.repeat(x.density)}</em>`:''}<small>${value(x)}</small>${!setupDraft?parcelEdges(x):''}</button>`).join('')}</div></div>
  <div class="sea">COAST — prototype geography</div>
  <div class="market"><h2>Building Market</h2>${[0,1].map(row=>`<div class="marketrow">${market.slice(row*5,row*5+5).map((c,j)=>c?`<button class="card" data-card="${row*5+j}"><b>${c.name}</b><span>${c.use}</span><strong>${'●'.repeat(c.density)}</strong><small>Subsidy ${c.coins} · Skip ${j}</small></button>`:`<div class="card card-empty" aria-label="Empty market slot"></div>`).join('')}</div>`).join('')}<div class="municipal-staging">Municipal staging — empty</div></div></section>
- <aside><h2><span class="playerdisc p${p.i}"></span>${p.name}</h2><div class="money">Hidden cash: $<b>${p.cash}</b></div><p>Tokens available: ${p.tokens}</p>${!setupDraft?parcelLegend():''}<h3>${setupDraft?'Starting parcel draft':selected?'Choose an action':'Select a parcel'}</h3><p>${setupDraft?'Choose any parcel except Municipal land. Existing private buildings may be acquired; pay $0 during the starting draft.':help()}</p>${mode==='zone'&&selected&&!pendingCouncil?zoneControls():''}${pendingCouncil?councilControls():''}${pendingBuilding!==null?buildingControls():''}${actions<=0&&!setupDraft?'<div class="noactions"><b>No more actions.</b> End your turn.</div>':''}<button id="end" ${setupDraft?'disabled':''}>${actions<=0?'End Turn':'End turn early'}</button><hr><h3>Growth</h3><p>Population ${population} / Jobs ${jobs}</p><p>Thresholds: 4 → 9 → 15</p><hr><h3>Game Log</h3><div class="gamelog">${gameLog.length?gameLog.slice().reverse().map(msg=>'<div>'+msg+'</div>').join(''):'<div>No actions yet.</div>'}</div></aside></main>`;
+ <aside><h2><span class="playerdisc p${p.i}"></span>${p.name}</h2><div class="money">Hidden cash: $<b>${p.cash}</b></div><p>Tokens available: ${p.tokens}</p><h3>${setupDraft?'Starting parcel draft':'Action: '+modeLabel()}</h3><p>${setupDraft?'Choose any parcel except Municipal land. Existing private buildings may be acquired; pay $0 during the starting draft.':help()}</p>${mode==='zone'&&selected&&!pendingCouncil?zoneControls():''}${pendingCouncil?councilControls():''}${pendingBuilding!==null?buildingControls():''}${actions<=0&&!setupDraft?'<div class="noactions"><b>No more actions.</b> End your turn.</div>':''}<button id="end" ${setupDraft?'disabled':''}>${actions<=0?'End Turn':'End turn early'}</button><hr><h3>Growth</h3><p>Population ${population} / Jobs ${jobs}</p><p>Thresholds: 4 → 9 → 15</p><hr><h3>Game Log</h3><div class="gamelog">${gameLog.length?gameLog.slice().reverse().map(msg=>'<div>'+msg+'</div>').join(''):'<div>No actions yet.</div>'}</div></aside></main>`;
  document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));document.querySelectorAll('.parcel').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();parcelClick(el.dataset.id)}));document.querySelectorAll('.card').forEach(e=>e.onclick=()=>takeCard(+e.dataset.card));document.querySelectorAll('[data-edge]').forEach(e=>e.onclick=ev=>{ev.stopPropagation();buildRoad(e.dataset.edge)});document.querySelectorAll('[data-zone]').forEach(e=>e.onclick=()=>applyZone(e.dataset.zone,+e.dataset.density));document.querySelectorAll('[data-buildchoice]').forEach(e=>e.onclick=()=>buildingChoice(e.dataset.buildchoice));document.querySelectorAll('[data-council]').forEach(e=>e.onclick=()=>councilChoice(e.dataset.council));document.querySelector('#end').onclick=endTurn;document.querySelector('#undo').onclick=undo;
-}
-function parcelLegend(){
- if(!selected)return '<div class="parcellegend"><h3>Parcel details</h3><p>Select a parcel on the board first.</p></div>';
- const x=parcels.find(q=>q.id===selected);if(!x)return '';
- const owner=Number.isInteger(x.owner)?players[x.owner].name:'Unowned';
- const zone=x.zone==='greenfield'?'Greenfield':x.zone+' '+('●'.repeat(x.density));
- const building=x.building?x.building+' '+('●'.repeat(x.buildingDensity||1)):'None';
- let vote='';
- if(mode==='zone'){
-  vote='<p><b>Council neighbours</b></p><div class="votebox">'+[['N',-1,0],['S',1,0],['E',0,1],['W',0,-1]].map(([d,dr,dc])=>{const n=at(x.r+dr,x.c+dc);return '<div><b>'+d+'</b>: '+(n?(n.zone==='greenfield'?'Greenfield':n.zone+' '+('●'.repeat(n.density))):'Edge')+'</div>'}).join('')+'</div><p>Choose proposed zoning below to preview the 12-cube Council bag before drawing.</p>';
- }
- return '<div class="parcellegend"><h3>Parcel '+x.id+'</h3><p><b>Owner:</b> '+owner+'<br><b>Zoning:</b> '+zone+'<br><b>Building:</b> '+building+'<br><b>Frontage:</b> '+frontage(x)+'<br><b>Land value:</b> $'+value(x)+'</p>'+vote+'</div>'
 }
 function modeLabel(){return {acquire:'Acquire parcel',sell:'Sell parcel',road:'Build Road',zone:'Zone / Rezone',building:'Take Building'}[mode]}
 function help(){return {acquire:'Click any parcel not owned by a player. Existing private buildings do not block ownership. Municipal parcels cannot be owned. Pay current zoning/land value.',sell:'Click one of your parcels to sell it at current land value. Buildings and zoning remain.',road:'Place up to 2 connected public road segments for 1 action. Each segment costs $1. New roads must connect to the road network.',zone:'Click one of your parcels, then choose proposed zoning.',building:'Choose a card from either market row. Skip payments are automatic.'}[mode]}
@@ -81,7 +69,6 @@ function parcelClick(id){
   else if(!setupDraft&&players[turn].bot)setTimeout(botTurn,500);
   return
  }
- if(mode!=='building'){selected=id;render();return}
  if(mode==='building'&&pendingBuilding!==null){
   if(legalBuild(x,market[pendingBuilding]))return placeBuilding(x);
   return alert(buildProblem(x,market[pendingBuilding])||'That parcel is not a legal location for this building.');
@@ -96,8 +83,270 @@ function parcelClick(id){
  }
  if(mode==='sell'&&x.owner===turn){
   const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
-  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+  logEvent(p.name+' sold '+id+' for }
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
  }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;x.buildingUse=c.use;x.buildingDensity=c.density;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ botPlans[turn]=null;botFailedZones[turn].clear();
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+ if(players[turn].bot)setTimeout(botTurn,500)
+}
+
+function botScoreParcel(x,pi){
+ let score=value(x)*3+(x.water?4:0);
+ for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+  if(!dr&&!dc)continue;
+  const n=at(x.r+dr,x.c+dc);if(n&&n.building)score+=2
+ }
+ if(pi===0)score+=value(x)*2+(x.water?3:0);
+ return score+Math.random()
+}
+function botDraft(){
+ if(!setupDraft)return;
+ const pi=draftOrder[draftPick];if(!players[pi].bot)return;
+ const choices=parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner)).sort((a,b)=>botScoreParcel(b,pi)-botScoreParcel(a,pi));
+ if(!choices.length)return;
+ parcelClick(choices[0].id);
+ if(setupDraft&&players[draftOrder[draftPick]].bot)setTimeout(botDraft,350);
+ else if(!setupDraft&&players[turn].bot)setTimeout(botTurn,500)
+}
+function botBuild(pi){
+ let best=null;
+ market.forEach((c,i)=>{
+  if(!c)return;
+  const cost=i-(i<5?0:5);if(players[pi].cash<cost)return;
+  parcels.forEach(x=>{
+   if(x.owner!==pi)return;
+   const oldTurn=turn;turn=pi;const ok=legalBuild(x,c);turn=oldTurn;
+   if(ok){const score=CONFIG.buildPayout+c.coins-cost+c.density*2;if(!best||score>best.score)best={i,x,score}}
+  })
+ });
+ if(!best)return false;
+ mode='building';pendingBuilding=best.i;placeBuilding(best.x);return true
+}
+function botPlanKey(x,use,density){return x.id+'|'+use+'|'+density}
+function chooseBotPlan(pi){
+ const p=players[pi];let best=null;
+ market.forEach((c,i)=>{
+  if(!c)return;
+  const skip=i-(i<5?0:5);if(p.cash<skip)return;
+  parcels.filter(x=>x.owner===pi&&!x.municipal).forEach(x=>{
+   if(x.building){
+    const oldUse=x.buildingUse||x.zone,oldDensity=x.buildingDensity||1;
+    if(c.use!==oldUse||c.density<=oldDensity)return;
+   }
+   if(botFailedZones[pi].has(botPlanKey(x,c.use,c.density)))return;
+   // Higher-density buildings still need their opposite-use neighbour prerequisite.
+   if(c.density>1){
+    const needUse=c.use==='residential'?'commercial':'residential',needDensity=c.density-1;
+    let found=false;
+    for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+     if(!dr&&!dc)continue;const n=at(x.r+dr,x.c+dc);
+     if(n&&n.building&&(n.buildingUse||n.zone)===needUse&&(n.buildingDensity||1)>=needDensity)found=true
+    }
+    if(!found)return;
+   }
+   const roadNeed=Math.max(0,CONFIG.frontage[c.use][c.density]-frontage(x));
+   const zoneNeeded=x.zone!==c.use||x.density<c.density;
+   const yes=zoneNeeded?councilOdds(x,c.use,c.density):12;
+   if(zoneNeeded&&yes<5)return;
+   const score=CONFIG.buildPayout+c.coins-skip+c.density*3-roadNeed*CONFIG.roadCost+(pi===0?value(x):0);
+   if(!best||score>best.score)best={parcelId:x.id,cardId:c.id,use:c.use,density:c.density,score}
+  })
+ });
+ botPlans[pi]=best;return best
+}
+function getBotPlanCard(plan){return market.find((c)=>c&&c.id===plan.cardId)}
+function botBuildPlan(pi,plan){
+ const x=parcels.find(q=>q.id===plan.parcelId),c=getBotPlanCard(plan);
+ if(!x||!c)return false;
+ const oldTurn=turn;turn=pi;const ok=legalBuild(x,c);turn=oldTurn;
+ if(!ok)return false;
+ const i=market.indexOf(c);mode='building';pendingBuilding=i;placeBuilding(x);botPlans[pi]=null;return true
+}
+function botZonePlan(pi,plan){
+ const x=parcels.find(q=>q.id===plan.parcelId),c=getBotPlanCard(plan);
+ if(!x||!c)return false;
+ if(x.zone===plan.use&&x.density>=plan.density)return false;
+ // Only ask Council once the planned building would be legal after the zoning change.
+ const oldTurn=turn,oldZone=x.zone,oldDensity=x.density;
+ turn=pi;x.zone=plan.use;x.density=plan.density;
+ const buildable=legalBuild(x,c);
+ x.zone=oldZone;x.density=oldDensity;turn=oldTurn;
+ if(!buildable)return false;
+ const yes=councilOdds(x,plan.use,plan.density);if(yes<5)return false;
+ const draw=drawCouncil(yes);snap();
+ if(draw>=4){
+  x.zone=plan.use;x.density=plan.density;
+  logEvent(players[pi].name+' rezoned '+x.id+' to '+plan.use+' '+('●'.repeat(plan.density))+' — Council passed '+draw+'-'+(7-draw));
+ }else{
+  logEvent(players[pi].name+' failed to rezone '+x.id+' — Council '+draw+'-'+(7-draw));
+  botFailedZones[pi].add(botPlanKey(x,plan.use,plan.density));botPlans[pi]=null;
+ }
+ spendAction();render();return true
+}
+function botRoadPlan(pi,plan){
+ const p=players[pi],x=parcels.find(q=>q.id===plan.parcelId);
+ if(!x||p.cash<CONFIG.roadCost)return false;
+ const target=CONFIG.frontage[plan.use][plan.density];
+ if(frontage(x)>=target)return false;
+ function edges(){
+  return ['N','S','W','E'].map(side=>edgeKey(x.r,x.c,side))
+   .filter(key=>!roads.has(key)&&edgeConnected(key))
+ }
+ let e=edges();if(!e.length)return false;
+ mode='road';roadSegments=0;buildRoad(e[0]);
+ // Second segment is used only while THIS planned parcel still needs frontage.
+ if(roadSegments===1&&p.cash>=CONFIG.roadCost&&frontage(x)<target){
+  e=edges();if(e.length)buildRoad(e[0])
+ }
+ return true
+}
+function botDiscard(pi){
+ let best=-1,bestCoins=0;
+ market.forEach((c,i)=>{if(!c)return;const skip=i-(i<5?0:5);if(c.coins-skip>bestCoins&&players[pi].cash>=skip){best=i;bestCoins=c.coins-skip}});
+ if(best<0)return false;
+ mode='building';pendingBuilding=best;buildingChoice('discard');return true
+}
+function botRoadTowardOwned(pi){
+ const p=players[pi];if(p.cash<CONFIG.roadCost)return false;
+ const targets=parcels.filter(x=>x.owner===pi&&!x.municipal&&frontage(x)===0);
+ if(!targets.length)return false;
+ let best=null;
+ for(const x of targets){
+  for(let r=0;r<=CONFIG.height;r++)for(let c=0;c<CONFIG.width;c++){
+   for(const o of ['H','V']){
+    if(o==='H'&&c>=CONFIG.width)continue;
+    if(o==='V'&&r>=CONFIG.height)continue;
+    const key=o+':'+r+':'+c;if(roads.has(key)||!edgeConnected(key))continue;
+    const [_,aa,bb]=key.split(':'),rr=+aa,cc=+bb;
+    const ends=o==='H'?[[rr,cc],[rr,cc+1]]:[[rr,cc],[rr+1,cc]];
+    const dist=Math.min(...ends.map(e=>Math.abs(e[0]-x.r)+Math.abs(e[1]-x.c)));
+    if(!best||dist<best.dist)best={key,dist,target:x}
+   }
+  }
+ }
+ if(!best)return false;
+ mode='road';roadSegments=0;buildRoad(best.key);
+ // Continue the same road action toward the stranded ownership token.
+ if(roadSegments===1&&p.cash>=CONFIG.roadCost&&frontage(best.target)===0){
+  let next=null;
+  for(let r=0;r<=CONFIG.height;r++)for(let c=0;c<=CONFIG.width;c++)for(const o of ['H','V']){
+   if(o==='H'&&c>=CONFIG.width)continue;if(o==='V'&&r>=CONFIG.height)continue;
+   const key=o+':'+r+':'+c;if(roads.has(key)||!edgeConnected(key))continue;
+   const [_,aa,bb]=key.split(':'),rr=+aa,cc=+bb;
+   const ends=o==='H'?[[rr,cc],[rr,cc+1]]:[[rr,cc],[rr+1,cc]];
+   const dist=Math.min(...ends.map(e=>Math.abs(e[0]-best.target.r)+Math.abs(e[1]-best.target.c)));
+   if(!next||dist<next.dist)next={key,dist}
+  }
+  if(next)buildRoad(next.key)
+ }
+ return true
+}
+function botAcquire(pi){
+ const p=players[pi];if(p.tokens<1)return false;
+ const choices=parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner)&&value(x)<=p.cash).sort((a,b)=>botScoreParcel(b,pi)-botScoreParcel(a,pi));
+ if(!choices.length)return false;
+ mode='acquire';parcelClick(choices[0].id);return true
+}
+function botSell(pi){
+ const owned=parcels.filter(x=>x.owner===pi);if(!owned.length)return false;
+ owned.sort((a,b)=>value(b)-value(a));mode='sell';parcelClick(owned[0].id);return true
+}
+function botAct(){
+ const pi=turn;
+ let plan=botPlans[pi];
+ if(plan&&!getBotPlanCard(plan))plan=botPlans[pi]=null;
+ if(!plan)plan=chooseBotPlan(pi);
+ if(plan){
+  if(botBuildPlan(pi,plan))return true;
+  if(botRoadPlan(pi,plan))return true;
+  if(botZonePlan(pi,plan))return true;
+  // Plan became impossible; abandon it rather than wasting the turn.
+  botPlans[pi]=null;
+ }
+ // If normal development is blocked, infrastructure should grow toward
+ // ownership tokens that are stranded away from the road network.
+ if(botRoadTowardOwned(pi))return true;
+ // If a token is still available, claim land rather than ending an empty turn.
+ if(botAcquire(pi))return true;
+ // A profitable discard is useful if it can raise cash.
+ if(botDiscard(pi))return true;
+ // Cash-starved bots should liquidate land rather than pass indefinitely.
+ // Prefer selling the highest-value holding; the recovered token can then
+ // be redeployed to cheaper land on a later action/turn.
+ if(players[pi].cash<1&&botSell(pi))return true;
+ return false
+}
+function botTurn(){
+ if(setupDraft||!players[turn].bot)return;
+ let guard=0;
+ function step(){
+  if(!players[turn].bot)return;
+  if(actions<=0||guard++>3){endTurn();return}
+  const before=actions;
+  if(!botAct()||actions===before){endTurn();return}
+  setTimeout(step,450)
+ }
+ step()
+}
+render();
+if(setupDraft&&players[draftOrder[draftPick]].bot)setTimeout(botDraft,400);
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
 }
 function buildRoad(key){
  if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
