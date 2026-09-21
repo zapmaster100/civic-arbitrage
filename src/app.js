@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-43';
+const BUILD_ID='CA-0921-44';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -83,7 +83,11 @@ function parcelClick(id){
  }
  if(mode==='sell'&&x.owner===turn){
   const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
-  logEvent(p.name+' sold '+id+' for function buildRoad(key){
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
  if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
  const p=players[turn];
  if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
