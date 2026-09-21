@@ -139,3 +139,5 @@ function endTurn(){
  snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
  logEvent(ending+' ended turn → '+players[turn].name);
  render();
+}
+render();
