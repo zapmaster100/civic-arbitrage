@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0921-51';
+const BUILD_ID='CA-0921-52';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -33,6 +33,11 @@ function setMode(m){if(setupDraft||actions<=0)return;actionStart=null;mode=m;sel
 function edgeKey(r,c,side){if(side==='N')return 'H:'+r+':'+c;if(side==='S')return 'H:'+(r+1)+':'+c;if(side==='W')return 'V:'+r+':'+c;return 'V:'+r+':'+(c+1)}
 function edgeConnected(key){if(!roads.size)return true;const [o,a,b]=key.split(':'),r=+a,c=+b;const ends=o==='H'?[[r,c],[r,c+1]]:[[r,c],[r+1,c]];for(const k of roads){const [oo,aa,bb]=k.split(':'),rr=+aa,cc=+bb;const ee=oo==='H'?[[rr,cc],[rr,cc+1]]:[[rr,cc],[rr+1,cc]];if(ends.some(e=>ee.some(q=>q[0]===e[0]&&q[1]===e[1])))return true}return false}
 function parcelEdges(x){return ['N','W',...(x.r===CONFIG.height-1?['S']:[]),...(x.c===CONFIG.width-1?['E']:[])].map(side=>{const key=edgeKey(x.r,x.c,side),built=roads.has(key);return `<span class="parcelroad ${side} ${built?'built':mode==='road'?'available':'hiddenedge'}" data-edge="${key}" title="${built?'Road':'Build road'}"></span>`}).join('')}
+const PIP_CODES={greenfield:[3],residential:{1:[1,2,3],2:[1,2,4],3:[1,4,5]},commercial:{1:[2,3,6],2:[2,4,6],3:[4,5,6]}};
+function pipCode(use,density){if(use==='greenfield'||!density)return PIP_CODES.greenfield;return PIP_CODES[use]?.[density]||[]}
+function pipRail(code,side){return `<span class="piprail ${side}">${[1,2,3,4,5,6].map(i=>`<i class="${code.includes(i)?'on':''}"></i>`).join('')}</span>`}
+function parcelPips(x){if(x.municipal)return '';const code=pipCode(x.zone,x.density);return ['N','E','S','W'].map(side=>pipRail(code,side)).join('')}
+function pipSupport(x,use,density){const code=pipCode(use,density);let total=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc);const nc=n&&!n.municipal?pipCode(n.zone,n.density):PIP_CODES.greenfield;total+=code.filter(p=>nc.includes(p)).length});return total}
 function rulesContent(){return `
 <h2>Civic Arbitrage — Playas de México</h2>
 <p>Each player is a private developer shaping one shared growing city, but everyone is pursuing their own profit. Roads, zoning and buildings created by one player can increase the value and development potential of somebody else's land. Read where the city is going, secure the right parcels, and profit from the city your opponents create.</p>
@@ -46,9 +51,9 @@ function rulesContent(){return `
 <h3>3. Build Road</h3>
 <p>Build up to <b>2 connected road segments</b> for $1 each. New roads must connect to the existing network. Roads are public and each road edge provides 1 frontage. A waterfront edge also provides 1 frontage.</p>
 <h3>4. Zone / Rezone</h3>
-<p>Choose one of your parcels and propose Residential, Commercial or Municipal zoning at Low ●, Medium ●● or High ●●● density. Council must approve it.</p>
-<p><b>Council bag:</b> each orthogonal neighbour contributes exactly 3 cubes. Two compare density: same density = YY, one level apart = YN, two or more levels apart = NN. The third compares use: same use = Y, different use = N. Greenfield has no matching use: versus Low it contributes YNN; versus Medium or High it contributes NNN. Water counts as Greenfield for Council.</p>
-<p>The four neighbours create a 12-cube bag. Draw 7; <b>4+ Yes passes</b>. After failure you may accept the result or pay to redraw: Low $1, Medium $2, High $3. You may pay for further redraws while affordable.</p>
+<p>Choose one of your parcels and propose Residential or Commercial zoning at Low ●, Medium ●● or High ●●● density.</p>
+<p><b>Border support:</b> zoning tiles have six possible pip positions around their edges. Compare the proposed tile with its four orthogonal neighbours and count the pips that align. Same use + same density gives 3 matches; different use + same density gives 2; same use one density apart gives 2; different use one apart gives 1; same use two apart gives 1; different use two apart gives 0. Greenfield matches Low once and Medium/High zero times.</p>
+<p>Add all four borders. <b>6 or more matching pips permits the rezoning.</b> There is no Council draw or redraw.</p>
 <h3>5. Take Building</h3>
 <p>Choose a card from the building market. Pay $1 onto each occupied card you pass. When you take a card, you collect the subsidy already on it.</p>
 <p><b>Place:</b> construct it on a legal parcel and receive the $5 building payout plus its subsidy. <b>Discard:</b> construct nothing and collect only its subsidy. Cancel before confirming to leave the market unchanged.</p>
@@ -65,7 +70,7 @@ function render(){
  document.querySelector('#app').innerHTML=`
  <header><div><h1>Civic Arbitrage</h1><p>Playas de México · v0.1 prototype · <b>Build ${BUILD_ID}</b></p></div><div class="turn"><button id="rulesBtn" type="button">Rules</button> <span class="playerdisc p${p.i}"></span><b>${p.name}</b> · <strong>${setupDraft?`Starting draft — pick ${draftPick+1}/8`:`${actions}/2 actions`}</strong></div></header>
  <div class="actionbar ${setupDraft?'disabled':''}">${[['acquire','Acquire'],['sell','Sell'],['road','Build Road'],['zone','Zone / Rezone'],['building','Take Building']].map(([m,l])=>`<button class="${mode===m?'active':''}" data-mode="${m}">${l}</button>`).join('')}<button id="undo" class="undo" ${history.length?'':'disabled'}>↶ Undo</button></div>
- <main><section><div class="boardwrap"><div class="board">${parcels.map(x=>`<button class="parcel ${x.zone} ${x.water?'water':''} ${x.municipal?'civic':''} ${selected===x.id?'selected':''} ${pendingBuilding!==null&&legalBuild(x,market[pendingBuilding])?'legalbuild':''}" data-id="${x.id}"><span>${x.id}</span>${x.building?`<b class="building">${x.building}</b>`:''}${Number.isInteger(x.owner)?`<i class="ownerdisc p${x.owner}"></i>`:''}${x.density?`<em>${'●'.repeat(x.density)}</em>`:''}<small>${value(x)}</small>${!setupDraft?parcelEdges(x):''}</button>`).join('')}</div></div>
+ <main><section><div class="boardwrap"><div class="board">${parcels.map(x=>`<button class="parcel ${x.zone} ${x.water?'water':''} ${x.municipal?'civic':''} ${selected===x.id?'selected':''} ${pendingBuilding!==null&&legalBuild(x,market[pendingBuilding])?'legalbuild':''}" data-id="${x.id}"><span>${x.id}</span>${x.building?`<b class="building">${x.building}</b>`:''}${Number.isInteger(x.owner)?`<i class="ownerdisc p${x.owner}"></i>`:''}${x.density?`<em>${'●'.repeat(x.density)}</em>`:''}<small>${value(x)}</small>${parcelPips(x)}${!setupDraft?parcelEdges(x):''}</button>`).join('')}</div></div>
  <div class="sea">COAST — prototype geography</div>
  <div class="market"><h2>Building Market</h2>${[0,1].map(row=>`<div class="marketrow">${market.slice(row*5,row*5+5).map((c,j)=>c?`<button class="card" data-card="${row*5+j}"><b>${c.name}</b><span>${c.use}</span><strong>${'●'.repeat(c.density)}</strong><small>Subsidy ${c.coins} · Skip ${j}</small></button>`:`<div class="card card-empty" aria-label="Empty market slot"></div>`).join('')}</div>`).join('')}<div class="municipal-staging">Municipal staging — empty</div></div></section>
  <aside><h2><span class="playerdisc p${p.i}"></span>${p.name}</h2><div class="money">Hidden cash: $<b>${p.cash}</b></div><p>Tokens available: ${p.tokens}</p><h3>${setupDraft?'Starting parcel draft':'Action: '+modeLabel()}</h3><p>${setupDraft?'Choose any parcel except Municipal land. Existing private buildings may be acquired; pay $0 during the starting draft.':help()}</p>${mode==='zone'&&selected&&!pendingCouncil?zoneControls():''}${pendingCouncil?councilControls():''}${pendingBuilding!==null?buildingControls():''}${actions<=0&&!setupDraft?'<div class="noactions"><b>No more actions.</b> End your turn.</div>':''}<button id="end" ${setupDraft?'disabled':''}>${actions<=0?'End Turn':'End turn early'}</button><hr><h3>Growth</h3><p>Population ${population} / Jobs ${jobs}</p><p>Thresholds: 4 → 9 → 15</p><hr><h3>Game Log</h3><div class="gamelog">${gameLog.length?gameLog.slice().reverse().map(msg=>'<div>'+msg+'</div>').join(''):'<div>No actions yet.</div>'}</div></aside></main><div id="rulesModal" class="rulesmodal" hidden><div class="rulespanel"><button id="rulesClose" class="rulesclose" type="button">×</button>${rulesContent()}</div></div>`;
@@ -73,7 +78,7 @@ function render(){
 }
 function modeLabel(){return {acquire:'Acquire parcel',sell:'Sell parcel',road:'Build Road',zone:'Zone / Rezone',building:'Take Building'}[mode]}
 function help(){return {acquire:'Click any parcel not owned by a player. Existing private buildings do not block ownership. Municipal parcels cannot be owned. Pay current zoning/land value.',sell:'Click one of your parcels to sell it at current land value. Buildings and zoning remain.',road:'Place up to 2 connected public road segments for 1 action. Each segment costs $1. New roads must connect to the road network.',zone:'Click one of your parcels, then choose proposed zoning.',building:'Choose a card from either market row. Skip payments are automatic.'}[mode]}
-function zoneControls(){const x=parcels.find(q=>q.id===selected);return `<div class="zonecontrols"><p><b>Proposed zoning — Council bag preview</b></p>${['residential','commercial','municipal'].map(z=>`<div><b>${z}</b> ${[1,2,3].map(d=>{const yes=councilOdds(x,z,d);return `<button data-zone="${z}" data-density="${d}">${'●'.repeat(d)} · ${yes}Y/${12-yes}N</button>`}).join('')}</div>`).join('')}</div>`}
+function zoneControls(){const x=parcels.find(q=>q.id===selected);return `<div class="zonecontrols"><p><b>Proposed zoning — border support</b></p>${['residential','commercial'].map(z=>`<div><b>${z}</b> ${[1,2,3].map(d=>{const support=pipSupport(x,z,d);return `<button data-zone="${z}" data-density="${d}" class="${support>=6?'zonepass':'zonefail'}">${'●'.repeat(d)} · ${support}/12 ${support>=6?'✓':'×'}</button>`}).join('')}</div>`).join('')}<p class="zonerule">6+ matching border pips = permitted.</p></div>`}
 function frontage(x){return ['N','S','E','W'].reduce((n,side)=>n+(roads.has(edgeKey(x.r,x.c,side))?1:0),0)+(x.water?1:0)}
 function buildProblem(x,c){if(x.owner!==turn)return 'You do not own this parcel.';if(x.municipal)return 'Municipal land cannot take a private building.';if(x.building){const oldDensity=x.buildingDensity||1,oldUse=x.buildingUse||x.zone;if(c.use!==oldUse)return `Redevelopment must stay ${oldUse}; an existing ${x.building} cannot be replaced by ${c.use}.`;if(c.density<=oldDensity)return `Redevelopment must increase density above the existing ${x.building} (${'●'.repeat(oldDensity)}).`;}if(x.zone!==c.use)return `Wrong zoning: this building requires ${c.use}.`;if(x.density<c.density)return `Zoning is too low: this building requires ${'●'.repeat(c.density)} density.`;if(frontage(x)<CONFIG.frontage[c.use][c.density])return `Not enough frontage: requires ${CONFIG.frontage[c.use][c.density]}, but this parcel has ${frontage(x)}.`;if(c.density>1){const needUse=c.use==='residential'?'commercial':'residential',needDensity=c.density-1;let found=false;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;const n=at(x.r+dr,x.c+dc);if(n&&n.building&&(n.buildingUse||n.zone)===needUse&&(n.buildingDensity||1)>=needDensity)found=true}if(!found)return `Missing nearby prerequisite: needs a built ${needUse} ${'●'.repeat(needDensity)} within the 8 surrounding parcels.`;}return null}
 function legalBuild(x,c){return !buildProblem(x,c)}
@@ -125,24 +130,8 @@ function buildRoad(key){
  render()
 }
 function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
-function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
-function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
-function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
-function councilChoice(choice){
- const c=pendingCouncil;if(!c)return;
- const p=players[turn],x=parcels.find(q=>q.id===c.id);
- if(choice==='redraw'){
-  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
-  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
-  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
-  render();return
- }
- if(c.draw>=4){
-  x.zone=c.use;x.density=c.density;
-  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
- }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
- spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
-}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;const support=pipSupport(x,use,density);if(support<6)return alert('Not permitted: '+support+'/12 border support. 6 is required.');snap();x.zone=use;x.density=density;spendAction();logEvent(players[turn].name+' rezoned '+x.id+' to '+use+' '+('●'.repeat(density))+' — '+support+'/12 border support');selected=null;pendingCouncil=null;actionStart=null;render()}
+function councilControls(){return ''}
 function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
 function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
 function placeBuilding(x){
@@ -229,8 +218,8 @@ function chooseBotPlan(pi){
    }
    const roadNeed=Math.max(0,CONFIG.frontage[c.use][c.density]-frontage(x));
    const zoneNeeded=x.zone!==c.use||x.density<c.density;
-   const yes=zoneNeeded?councilOdds(x,c.use,c.density):12;
-   if(zoneNeeded&&yes<5)return;
+   const yes=zoneNeeded?pipSupport(x,c.use,c.density):12;
+   if(zoneNeeded&&yes<6)return;
    const score=CONFIG.buildPayout+c.coins-skip+c.density*3-roadNeed*CONFIG.roadCost+(pi===0?value(x):0);
    if(!best||score>best.score)best={parcelId:x.id,cardId:c.id,use:c.use,density:c.density,score}
   })
@@ -255,15 +244,9 @@ function botZonePlan(pi,plan){
  const buildable=legalBuild(x,c);
  x.zone=oldZone;x.density=oldDensity;turn=oldTurn;
  if(!buildable)return false;
- const yes=councilOdds(x,plan.use,plan.density);if(yes<5)return false;
- const draw=drawCouncil(yes);snap();
- if(draw>=4){
-  x.zone=plan.use;x.density=plan.density;
-  logEvent(players[pi].name+' rezoned '+x.id+' to '+plan.use+' '+('●'.repeat(plan.density))+' — Council passed '+draw+'-'+(7-draw));
- }else{
-  logEvent(players[pi].name+' failed to rezone '+x.id+' — Council '+draw+'-'+(7-draw));
-  botFailedZones[pi].add(botPlanKey(x,plan.use,plan.density));botPlans[pi]=null;
- }
+ const support=pipSupport(x,plan.use,plan.density);if(support<6)return false;
+ snap();x.zone=plan.use;x.density=plan.density;
+ logEvent(players[pi].name+' rezoned '+x.id+' to '+plan.use+' '+('●'.repeat(plan.density))+' — '+support+'/12 border support');
  spendAction();render();return true
 }
 function botRoadPlan(pi,plan){
