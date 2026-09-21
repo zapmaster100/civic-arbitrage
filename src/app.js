@@ -1,7 +1,7 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-27';
+const BUILD_ID='CA-0920-28';
 
-const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i}));
+const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
 const draftOrder=[0,1,2,3,3,2,1,0], rows='ABCDEFG'.split('');
 const parcels=[], roads=new Set(), history=[];
@@ -139,5 +139,92 @@ function endTurn(){
  snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
  logEvent(ending+' ended turn → '+players[turn].name);
  render();
+ if(players[turn].bot)setTimeout(botTurn,500)
+}
+
+function botScoreParcel(x,pi){
+ let score=value(x)*3+(x.water?4:0);
+ for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+  if(!dr&&!dc)continue;
+  const n=at(x.r+dr,x.c+dc);if(n&&n.building)score+=2
+ }
+ if(pi===0)score+=value(x)*2+(x.water?3:0);
+ return score+Math.random()
+}
+function botDraft(){
+ if(!setupDraft)return;
+ const pi=draftOrder[draftPick];if(!players[pi].bot)return;
+ const choices=parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner)).sort((a,b)=>botScoreParcel(b,pi)-botScoreParcel(a,pi));
+ if(!choices.length)return;
+ parcelClick(choices[0].id);
+ if(setupDraft&&players[draftOrder[draftPick]].bot)setTimeout(botDraft,350);
+ else if(!setupDraft&&players[turn].bot)setTimeout(botTurn,500)
+}
+function botBuild(pi){
+ let best=null;
+ market.forEach((c,i)=>{
+  if(!c)return;
+  const cost=i-(i<5?0:5);if(players[pi].cash<cost)return;
+  parcels.forEach(x=>{
+   if(x.owner!==pi)return;
+   const oldTurn=turn;turn=pi;const ok=legalBuild(x,c);turn=oldTurn;
+   if(ok){const score=CONFIG.buildPayout+c.coins-cost+c.density*2;if(!best||score>best.score)best={i,x,score}}
+  })
+ });
+ if(!best)return false;
+ mode='building';pendingBuilding=best.i;placeBuilding(best.x);return true
+}
+function botZone(pi){
+ let best=null;
+ parcels.filter(x=>x.owner===pi).forEach(x=>{
+  for(const use of ['residential','commercial'])for(const density of [1,2,3]){
+   if(x.zone===use&&x.density===density)continue;
+   const yes=councilOdds(x,use,density);
+   if(yes<5)continue;
+   const score=yes+density*2+(pi===0?value(x):0);
+   if(!best||score>best.score)best={x,use,density,yes,score}
+  }
+ });
+ if(!best)return false;
+ const draw=drawCouncil(best.yes);
+ if(draw>=4){
+  snap();best.x.zone=best.use;best.x.density=best.density;
+  logEvent(players[pi].name+' rezoned '+best.x.id+' to '+best.use+' '+('●'.repeat(best.density))+' — Council passed '+draw+'-'+(7-draw));
+ }else{
+  snap();logEvent(players[pi].name+' failed to rezone '+best.x.id+' — Council '+draw+'-'+(7-draw))
+ }
+ spendAction();render();return true
+}
+function botAcquire(pi){
+ const p=players[pi];if(p.tokens<1)return false;
+ const choices=parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner)&&value(x)<=p.cash).sort((a,b)=>botScoreParcel(b,pi)-botScoreParcel(a,pi));
+ if(!choices.length)return false;
+ mode='acquire';parcelClick(choices[0].id);return true
+}
+function botSell(pi){
+ const owned=parcels.filter(x=>x.owner===pi);if(!owned.length)return false;
+ owned.sort((a,b)=>value(b)-value(a));mode='sell';parcelClick(owned[0].id);return true
+}
+function botAct(){
+ const pi=turn,p=players[pi];
+ if(botBuild(pi))return true;
+ if(p.tokens===0&&p.cash<2&&botSell(pi))return true;
+ if(botZone(pi))return true;
+ if(botAcquire(pi))return true;
+ if(p.tokens===0&&botSell(pi))return true;
+ return false
+}
+function botTurn(){
+ if(setupDraft||!players[turn].bot)return;
+ let guard=0;
+ function step(){
+  if(!players[turn].bot)return;
+  if(actions<=0||guard++>3){endTurn();return}
+  const before=actions;
+  if(!botAct()||actions===before){endTurn();return}
+  setTimeout(step,450)
+ }
+ step()
 }
 render();
+if(setupDraft&&players[draftOrder[draftPick]].bot)setTimeout(botDraft,400);
