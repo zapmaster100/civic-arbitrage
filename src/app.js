@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-38';
+const BUILD_ID='CA-0920-39';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -263,6 +263,41 @@ function botDiscard(pi){
  if(best<0)return false;
  mode='building';pendingBuilding=best;buildingChoice('discard');return true
 }
+function botRoadTowardOwned(pi){
+ const p=players[pi];if(p.cash<CONFIG.roadCost)return false;
+ const targets=parcels.filter(x=>x.owner===pi&&!x.municipal&&frontage(x)===0);
+ if(!targets.length)return false;
+ let best=null;
+ for(const x of targets){
+  for(let r=0;r<=CONFIG.height;r++)for(let c=0;c<CONFIG.width;c++){
+   for(const o of ['H','V']){
+    if(o==='H'&&c>=CONFIG.width)continue;
+    if(o==='V'&&r>=CONFIG.height)continue;
+    const key=o+':'+r+':'+c;if(roads.has(key)||!edgeConnected(key))continue;
+    const [_,aa,bb]=key.split(':'),rr=+aa,cc=+bb;
+    const ends=o==='H'?[[rr,cc],[rr,cc+1]]:[[rr,cc],[rr+1,cc]];
+    const dist=Math.min(...ends.map(e=>Math.abs(e[0]-x.r)+Math.abs(e[1]-x.c)));
+    if(!best||dist<best.dist)best={key,dist,target:x}
+   }
+  }
+ }
+ if(!best)return false;
+ mode='road';roadSegments=0;buildRoad(best.key);
+ // Continue the same road action toward the stranded ownership token.
+ if(roadSegments===1&&p.cash>=CONFIG.roadCost&&frontage(best.target)===0){
+  let next=null;
+  for(let r=0;r<=CONFIG.height;r++)for(let c=0;c<=CONFIG.width;c++)for(const o of ['H','V']){
+   if(o==='H'&&c>=CONFIG.width)continue;if(o==='V'&&r>=CONFIG.height)continue;
+   const key=o+':'+r+':'+c;if(roads.has(key)||!edgeConnected(key))continue;
+   const [_,aa,bb]=key.split(':'),rr=+aa,cc=+bb;
+   const ends=o==='H'?[[rr,cc],[rr,cc+1]]:[[rr,cc],[rr+1,cc]];
+   const dist=Math.min(...ends.map(e=>Math.abs(e[0]-best.target.r)+Math.abs(e[1]-best.target.c)));
+   if(!next||dist<next.dist)next={key,dist}
+  }
+  if(next)buildRoad(next.key)
+ }
+ return true
+}
 function botAcquire(pi){
  const p=players[pi];if(p.tokens<1)return false;
  const choices=parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner)&&value(x)<=p.cash).sort((a,b)=>botScoreParcel(b,pi)-botScoreParcel(a,pi));
@@ -285,9 +320,12 @@ function botAct(){
   // Plan became impossible; abandon it rather than wasting the turn.
   botPlans[pi]=null;
  }
+ // If normal development is blocked, infrastructure should grow toward
+ // ownership tokens that are stranded away from the road network.
+ if(botRoadTowardOwned(pi))return true;
+ // If a token is still available, claim land rather than ending an empty turn.
  if(botAcquire(pi))return true;
- // If no development or acquisition is available, a profitable discard can
- // collect subsidy and cycle the market instead of an empty turn.
+ // A profitable discard is the final fallback before ending the turn.
  if(botDiscard(pi))return true;
  return false
 }
