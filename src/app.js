@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-25';
+const BUILD_ID='CA-0920-26';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -26,7 +26,7 @@ function value(p){let v=p.density;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=
 function state(){return JSON.stringify({players,turn,actions,mode,selected,population,jobs,setupDraft,draftPick,parcels,roads:[...roads],market})}
 function restore(raw){const q=JSON.parse(raw);players.splice(0,players.length,...q.players);turn=q.turn;actions=q.actions;mode=q.mode;selected=q.selected;population=q.population;jobs=q.jobs;setupDraft=q.setupDraft;draftPick=q.draftPick;parcels.splice(0,parcels.length,...q.parcels);roads.clear();q.roads.forEach(x=>roads.add(x));market=q.market;pendingBuilding=null;pendingCouncil=null;roadSegments=0}
 function snap(){try{history.push(state())}catch(e){console.error('Snapshot failed',e)}}
-function undo(){if(actionStart){restore(actionStart);actionStart=null;if(history.length)history.pop();render();return}if(!history.length)return;restore(history.pop());render()}
+function undo(){const who=players[turn].name;if(actionStart){restore(actionStart);actionStart=null;if(history.length)history.pop();logEvent(who+' - Undo - Current action');render();return}if(!history.length)return;restore(history.pop());logEvent(who+' - Undo - Previous action');render()}
 function spendAction(){actions--}
 function setMode(m){if(setupDraft||actions<=0)return;actionStart=null;mode=m;selected=null;pendingBuilding=null;pendingCouncil=null;roadSegments=0;render()}
 function edgeKey(r,c,side){if(side==='N')return 'H:'+r+':'+c;if(side==='S')return 'H:'+(r+1)+':'+c;if(side==='W')return 'V:'+r+':'+c;return 'V:'+r+':'+(c+1)}
@@ -60,7 +60,7 @@ function parcelClick(id){
   if(x.municipal)return alert('Municipal parcels cannot be privately owned.');
   if(Number.isInteger(x.owner))return alert('That parcel is already owned by a player.');
   snap();x.owner=pi;p.tokens=Math.max(0,p.tokens-1);if(!p.owned.includes(id))p.owned.push(id);
-  logEvent(p.name+' drafted '+id);
+  logEvent(p.name+' - Drafted - '+id);
   draftPick+=1;
   if(draftPick>=draftOrder.length){setupDraft=false;turn=0;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;}
   render();return
@@ -75,7 +75,5594 @@ function parcelClick(id){
  if(mode==='acquire'&&!Number.isInteger(x.owner)){
   const cost=value(x);if(p.tokens<1||p.cash<cost)return alert('Not enough cash or ownership tokens.');
   snap();x.owner=turn;p.tokens--;p.cash-=cost;p.owned.push(id);spendAction();
-  logEvent(p.name+' acquired '+id+' for $'+cost);render();return
+  logEvent(p.name+' - Acquired - '+id+' - render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' - Sold - '+id+' - render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' - Built Road - '+key+' - 
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' - Council Redraw - '+x.id+' - 
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' - Zone - '+x.id+' - '+c.use+' '+('●'.repeat(c.density))+' - Passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' - Zone Failed - '+x.id+' - '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' - Built - '+c.name+' - '+x.id+' - 
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' - Discarded - '+c.name+' - 
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' - End Turn - '+players[turn].name+' next');
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++c.cost);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.buildPayout+(subsidy?' + 
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++c.cost);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++subsidy+' subsidy':''));
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++c.cost);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++c.cost);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.buildPayout+(subsidy?' + 
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++c.cost);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++subsidy+' subsidy':''));
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++c.cost);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
+ }
+ if(mode==='sell'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for $'+sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++sale);render();return
+ }
+ if(mode==='zone'&&x.owner===turn){selected=id;render()}
+}
+function buildRoad(key){
+ if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
+ const p=players[turn];
+ if(p.cash<CONFIG.roadCost)return alert('Not enough cash.');
+ if(!edgeConnected(key))return alert('New road must connect to the existing road network.');
+ if(roadSegments===0){actionStart=state();history.push(actionStart);spendAction()}
+ p.cash-=CONFIG.roadCost;roads.add(key);roadSegments++;
+ logEvent(p.name+' built road '+key+' for $'+CONFIG.roadCost);
+ if(roadSegments>=2)actionStart=null;
+ render()
+}
+function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc),nd=n?n.density:0,nu=n?n.zone:'greenfield',diff=Math.abs(density-nd);yes+=diff===0?2:diff===1?1:0;yes+=nu===use?1:0});return yes}
+function drawCouncil(yes){const bag=Array(yes).fill(1).concat(Array(12-yes).fill(0));for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}return bag.slice(0,7).reduce((a,b)=>a+b,0)}
+function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;actionStart=state();const yes=councilOdds(x,use,density),draw=drawCouncil(yes);pendingCouncil={id:x.id,use,density,yes,draw,cost:density};render()}
+function councilControls(){const c=pendingCouncil;return '<div class="councilbox"><h3>Council draw</h3><p>Bag: '+c.yes+' Yes / '+(12-c.yes)+' No</p><p>Draw: <b>'+c.draw+' Yes / '+(7-c.draw)+' No</b></p>'+(c.draw>=4?'<button data-council="accept">Accept — PASSED</button>':'<button data-council="redraw">Pay $'+c.cost+' to redraw</button> <button data-council="accept">Accept failure</button>')+'</div>'}
+function councilChoice(choice){
+ const c=pendingCouncil;if(!c)return;
+ const p=players[turn],x=parcels.find(q=>q.id===c.id);
+ if(choice==='redraw'){
+  if(p.cash<c.cost)return alert('Not enough cash to redraw.');
+  p.cash-=c.cost;c.draw=drawCouncil(c.yes);
+  logEvent(p.name+' paid $'+c.cost+' to redraw Council for '+x.id);
+  render();return
+ }
+ if(c.draw>=4){
+  x.zone=c.use;x.density=c.density;
+  logEvent(p.name+' rezoned '+x.id+' to '+c.use+' '+('●'.repeat(c.density))+' — Council passed '+c.draw+'-'+(7-c.draw));
+ }else logEvent(p.name+' failed to rezone '+x.id+' — Council '+c.draw+'-'+(7-c.draw));
+ spendAction();selected=null;pendingCouncil=null;actionStart=null;render()
+}
+function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function placeBuilding(x){
+ const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(x.building)x.building=null;
+ x.building=c.name;p.cash+=CONFIG.buildPayout;
+ if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ c.coins=0;pendingBuilding=null;spendAction();render()
+}
+function buildingChoice(choice){
+ if(pendingBuilding===null)return;
+ if(choice==='cancel'){pendingBuilding=null;render();return}
+ if(choice==='discard'){
+  const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
+  logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
+  c.coins=0;pendingBuilding=null;spendAction();render()
+ }
+}
+function endTurn(){
+ if(setupDraft)return;
+ const ending=players[turn].name;
+ if(actionStart)actionStart=null;
+ snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
+ logEvent(ending+' ended turn → '+players[turn].name);
+ render();
+}
+render();
++cost);render();return
  }
  if(mode==='sell'&&x.owner===turn){
   const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
