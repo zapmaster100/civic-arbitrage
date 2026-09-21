@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-36';
+const BUILD_ID='CA-0920-37';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -217,42 +217,36 @@ function botZone(pi){
 function botRoad(pi){
  const p=players[pi];
  if(p.cash<CONFIG.roadCost)return false;
- // Only build frontage needed for the NEXT density level the parcel can develop to.
- let choices=[];
- parcels.filter(x=>x.owner===pi).forEach(x=>{
-  const use=x.building?(x.buildingUse||x.zone):(x.zone==='residential'||x.zone==='commercial'?x.zone:null);
-  const current=x.building?(x.buildingDensity||1):0;
-  const nextDensity=current?current+1:Math.max(1,x.density);
-  if(!use||nextDensity>3||x.zone!==use||x.density<nextDensity)return;
-  const target=CONFIG.frontage[use][nextDensity],need=target-frontage(x);
-  if(need<=0)return;
-  for(const side of ['N','S','W','E']){
-   const key=edgeKey(x.r,x.c,side);
-   if(roads.has(key)||!edgeConnected(key))continue;
-   choices.push({key,score:need*10+nextDensity*3+value(x)})
-  }
- });
- if(!choices.length)return false;
- choices.sort((a,b)=>b.score-a.score);
- mode='road';roadSegments=0;
- buildRoad(choices[0].key);
- // Recalculate after segment one. Add segment two only if an owned parcel still
- // lacks frontage for its next legal density step.
- if(roadSegments===1&&p.cash>=CONFIG.roadCost){
-  let second=[];
+ // Road planning looks at a parcel's NEXT useful build, including zoning that
+ // the bot has not completed yet. This prevents greenfield owners from stalling.
+ function roadTargets(){
+  const out=[];
   parcels.filter(x=>x.owner===pi).forEach(x=>{
-   const use=x.building?(x.buildingUse||x.zone):(x.zone==='residential'||x.zone==='commercial'?x.zone:null);
-   const current=x.building?(x.buildingDensity||1):0;
-   const nextDensity=current?current+1:Math.max(1,x.density);
-   if(!use||nextDensity>3||x.zone!==use||x.density<nextDensity)return;
-   const need=CONFIG.frontage[use][nextDensity]-frontage(x);
-   if(need<=0)return;
-   for(const side of ['N','S','W','E']){
-    const key=edgeKey(x.r,x.c,side);
-    if(!roads.has(key)&&edgeConnected(key))second.push({key,score:need*10+nextDensity*3+value(x)})
+   const plans=[];
+   if(x.building){
+    const use=x.buildingUse||x.zone,next=(x.buildingDensity||1)+1;
+    if(next<=3)plans.push({use,density:next})
+   }else{
+    market.forEach(c=>{if(c)plans.push({use:c.use,density:c.density})})
    }
+   plans.forEach(plan=>{
+    const target=CONFIG.frontage[plan.use][plan.density],need=target-frontage(x);
+    if(need<=0)return;
+    for(const side of ['N','S','W','E']){
+     const key=edgeKey(x.r,x.c,side);
+     if(roads.has(key)||!edgeConnected(key))continue;
+     out.push({key,score:need*10+plan.density*3+value(x)})
+    }
+   })
   });
-  if(second.length){second.sort((a,b)=>b.score-a.score);buildRoad(second[0].key)}
+  return out
+ }
+ let choices=roadTargets();if(!choices.length)return false;
+ choices.sort((a,b)=>b.score-a.score);
+ mode='road';roadSegments=0;buildRoad(choices[0].key);
+ if(roadSegments===1&&p.cash>=CONFIG.roadCost){
+  choices=roadTargets().filter(q=>!roads.has(q.key));
+  if(choices.length){choices.sort((a,b)=>b.score-a.score);buildRoad(choices[0].key)}
  }
  return true
 }
