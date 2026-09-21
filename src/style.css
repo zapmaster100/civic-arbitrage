@@ -52,3 +52,9 @@
  .parcel .piprail.E,.parcel .piprail.W{top:22px!important;bottom:22px!important}
  .parcel .piprail i{width:3px!important;height:3px!important;min-width:3px!important;min-height:3px!important}
 }
+
+/* CA-0921-56: show only active domino pips; empty positions stay invisible */
+.parcel .piprail i{visibility:hidden!important;border:0!important;background:transparent!important}
+.parcel .piprail i.on{visibility:visible!important;width:5px!important;height:5px!important;min-width:5px!important;min-height:5px!important;background:#241f19!important;border:0!important}
+.parcel .piprail.N,.parcel .piprail.S{left:20%!important;right:20%!important}
+.parcel .piprail.E,.parcel .piprail.W{top:20%!important;bottom:20%!important}
