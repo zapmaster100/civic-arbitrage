@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-39';
+const BUILD_ID='CA-0920-40';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -325,8 +325,12 @@ function botAct(){
  if(botRoadTowardOwned(pi))return true;
  // If a token is still available, claim land rather than ending an empty turn.
  if(botAcquire(pi))return true;
- // A profitable discard is the final fallback before ending the turn.
+ // A profitable discard is useful if it can raise cash.
  if(botDiscard(pi))return true;
+ // Cash-starved bots should liquidate land rather than pass indefinitely.
+ // Prefer selling the highest-value holding; the recovered token can then
+ // be redeployed to cheaper land on a later action/turn.
+ if(players[pi].cash<1&&botSell(pi))return true;
  return false
 }
 function botTurn(){
