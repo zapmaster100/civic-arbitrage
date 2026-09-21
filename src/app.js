@@ -1,11 +1,12 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-37';
+const BUILD_ID='CA-0920-38';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
 const draftOrder=[0,1,2,3,3,2,1,0], rows='ABCDEFG'.split('');
 const parcels=[], roads=new Set(), history=[];
 const gameLog=[];
+const botPlans=[null,null,null,null],botFailedZones=[new Set(),new Set(),new Set(),new Set()];
 function logEvent(msg){gameLog.push(msg);if(gameLog.length>50)gameLog.shift();}
 for(let r=0;r<CONFIG.height;r++)for(let c=0;c<CONFIG.width;c++)parcels.push({id:rows[r]+(c+1),r,c,owner:null,zone:'greenfield',density:0,building:null,water:r===6,municipal:false});
 const plaza={r:1,c:5};
@@ -137,6 +138,7 @@ function buildingChoice(choice){
 }
 function endTurn(){
  if(setupDraft)return;
+ botPlans[turn]=null;botFailedZones[turn].clear();
  const ending=players[turn].name;
  if(actionStart)actionStart=null;
  snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
@@ -177,78 +179,89 @@ function botBuild(pi){
  if(!best)return false;
  mode='building';pendingBuilding=best.i;placeBuilding(best.x);return true
 }
-function botZone(pi){
- let best=null;
- parcels.filter(x=>x.owner===pi).forEach(x=>{
-  for(const use of ['residential','commercial'])for(const density of [1,2,3]){
-   if(x.zone===use&&x.density===density)continue;
-   // Bots only rezone when it advances a concrete building plan.
-   // An existing building can only redevelop upward in the same use.
+function botPlanKey(x,use,density){return x.id+'|'+use+'|'+density}
+function chooseBotPlan(pi){
+ const p=players[pi];let best=null;
+ market.forEach((c,i)=>{
+  if(!c)return;
+  const skip=i-(i<5?0:5);if(p.cash<skip)return;
+  parcels.filter(x=>x.owner===pi&&!x.municipal).forEach(x=>{
    if(x.building){
     const oldUse=x.buildingUse||x.zone,oldDensity=x.buildingDensity||1;
-    if(use!==oldUse||density<=oldDensity)continue;
+    if(c.use!==oldUse||c.density<=oldDensity)return;
    }
-   const candidateCards=market.filter(c=>c&&c.use===use&&c.density===density);
-   if(!candidateCards.length)continue;
-   const yes=councilOdds(x,use,density);
-   if(yes<5)continue;
-   let buildable=false;
-   for(const c of candidateCards){
-    const oldTurn=turn,oldZone=x.zone,oldDensity=x.density;
-    turn=pi;x.zone=use;x.density=density;
-    buildable=legalBuild(x,c);
-    x.zone=oldZone;x.density=oldDensity;turn=oldTurn;
-    if(buildable)break
+   if(botFailedZones[pi].has(botPlanKey(x,c.use,c.density)))return;
+   // Higher-density buildings still need their opposite-use neighbour prerequisite.
+   if(c.density>1){
+    const needUse=c.use==='residential'?'commercial':'residential',needDensity=c.density-1;
+    let found=false;
+    for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+     if(!dr&&!dc)continue;const n=at(x.r+dr,x.c+dc);
+     if(n&&n.building&&(n.buildingUse||n.zone)===needUse&&(n.buildingDensity||1)>=needDensity)found=true
+    }
+    if(!found)return;
    }
-   if(!buildable)continue;
-   const score=yes+density*3+(pi===0?value(x):0);
-   if(!best||score>best.score)best={x,use,density,yes,score}
-  }
+   const roadNeed=Math.max(0,CONFIG.frontage[c.use][c.density]-frontage(x));
+   const zoneNeeded=x.zone!==c.use||x.density<c.density;
+   const yes=zoneNeeded?councilOdds(x,c.use,c.density):12;
+   if(zoneNeeded&&yes<5)return;
+   const score=CONFIG.buildPayout+c.coins-skip+c.density*3-roadNeed*CONFIG.roadCost+(pi===0?value(x):0);
+   if(!best||score>best.score)best={parcelId:x.id,cardId:c.id,use:c.use,density:c.density,score}
+  })
  });
- if(!best)return false;
- const draw=drawCouncil(best.yes);
- snap();
+ botPlans[pi]=best;return best
+}
+function getBotPlanCard(plan){return market.find((c)=>c&&c.id===plan.cardId)}
+function botBuildPlan(pi,plan){
+ const x=parcels.find(q=>q.id===plan.parcelId),c=getBotPlanCard(plan);
+ if(!x||!c)return false;
+ const oldTurn=turn;turn=pi;const ok=legalBuild(x,c);turn=oldTurn;
+ if(!ok)return false;
+ const i=market.indexOf(c);mode='building';pendingBuilding=i;placeBuilding(x);botPlans[pi]=null;return true
+}
+function botZonePlan(pi,plan){
+ const x=parcels.find(q=>q.id===plan.parcelId),c=getBotPlanCard(plan);
+ if(!x||!c)return false;
+ if(x.zone===plan.use&&x.density>=plan.density)return false;
+ // Only ask Council once the planned building would be legal after the zoning change.
+ const oldTurn=turn,oldZone=x.zone,oldDensity=x.density;
+ turn=pi;x.zone=plan.use;x.density=plan.density;
+ const buildable=legalBuild(x,c);
+ x.zone=oldZone;x.density=oldDensity;turn=oldTurn;
+ if(!buildable)return false;
+ const yes=councilOdds(x,plan.use,plan.density);if(yes<5)return false;
+ const draw=drawCouncil(yes);snap();
  if(draw>=4){
-  best.x.zone=best.use;best.x.density=best.density;
-  logEvent(players[pi].name+' rezoned '+best.x.id+' to '+best.use+' '+('●'.repeat(best.density))+' — Council passed '+draw+'-'+(7-draw));
- }else logEvent(players[pi].name+' failed to rezone '+best.x.id+' — Council '+draw+'-'+(7-draw));
+  x.zone=plan.use;x.density=plan.density;
+  logEvent(players[pi].name+' rezoned '+x.id+' to '+plan.use+' '+('●'.repeat(plan.density))+' — Council passed '+draw+'-'+(7-draw));
+ }else{
+  logEvent(players[pi].name+' failed to rezone '+x.id+' — Council '+draw+'-'+(7-draw));
+  botFailedZones[pi].add(botPlanKey(x,plan.use,plan.density));botPlans[pi]=null;
+ }
  spendAction();render();return true
 }
-function botRoad(pi){
- const p=players[pi];
- if(p.cash<CONFIG.roadCost)return false;
- // Road planning looks at a parcel's NEXT useful build, including zoning that
- // the bot has not completed yet. This prevents greenfield owners from stalling.
- function roadTargets(){
-  const out=[];
-  parcels.filter(x=>x.owner===pi).forEach(x=>{
-   const plans=[];
-   if(x.building){
-    const use=x.buildingUse||x.zone,next=(x.buildingDensity||1)+1;
-    if(next<=3)plans.push({use,density:next})
-   }else{
-    market.forEach(c=>{if(c)plans.push({use:c.use,density:c.density})})
-   }
-   plans.forEach(plan=>{
-    const target=CONFIG.frontage[plan.use][plan.density],need=target-frontage(x);
-    if(need<=0)return;
-    for(const side of ['N','S','W','E']){
-     const key=edgeKey(x.r,x.c,side);
-     if(roads.has(key)||!edgeConnected(key))continue;
-     out.push({key,score:need*10+plan.density*3+value(x)})
-    }
-   })
-  });
-  return out
+function botRoadPlan(pi,plan){
+ const p=players[pi],x=parcels.find(q=>q.id===plan.parcelId);
+ if(!x||p.cash<CONFIG.roadCost)return false;
+ const target=CONFIG.frontage[plan.use][plan.density];
+ if(frontage(x)>=target)return false;
+ function edges(){
+  return ['N','S','W','E'].map(side=>edgeKey(x.r,x.c,side))
+   .filter(key=>!roads.has(key)&&edgeConnected(key))
  }
- let choices=roadTargets();if(!choices.length)return false;
- choices.sort((a,b)=>b.score-a.score);
- mode='road';roadSegments=0;buildRoad(choices[0].key);
- if(roadSegments===1&&p.cash>=CONFIG.roadCost){
-  choices=roadTargets().filter(q=>!roads.has(q.key));
-  if(choices.length){choices.sort((a,b)=>b.score-a.score);buildRoad(choices[0].key)}
+ let e=edges();if(!e.length)return false;
+ mode='road';roadSegments=0;buildRoad(e[0]);
+ // Second segment is used only while THIS planned parcel still needs frontage.
+ if(roadSegments===1&&p.cash>=CONFIG.roadCost&&frontage(x)<target){
+  e=edges();if(e.length)buildRoad(e[0])
  }
  return true
+}
+function botDiscard(pi){
+ let best=-1,bestCoins=0;
+ market.forEach((c,i)=>{if(!c)return;const skip=i-(i<5?0:5);if(c.coins-skip>bestCoins&&players[pi].cash>=skip){best=i;bestCoins=c.coins-skip}});
+ if(best<0)return false;
+ mode='building';pendingBuilding=best;buildingChoice('discard');return true
 }
 function botAcquire(pi){
  const p=players[pi];if(p.tokens<1)return false;
@@ -262,13 +275,20 @@ function botSell(pi){
 }
 function botAct(){
  const pi=turn;
- if(botBuild(pi))return true;
- if(botZone(pi))return true;
- // Roads are infrastructure for future builds, so try them before buying more land.
- if(botRoad(pi))return true;
+ let plan=botPlans[pi];
+ if(plan&&!getBotPlanCard(plan))plan=botPlans[pi]=null;
+ if(!plan)plan=chooseBotPlan(pi);
+ if(plan){
+  if(botBuildPlan(pi,plan))return true;
+  if(botRoadPlan(pi,plan))return true;
+  if(botZonePlan(pi,plan))return true;
+  // Plan became impossible; abandon it rather than wasting the turn.
+  botPlans[pi]=null;
+ }
  if(botAcquire(pi))return true;
- // Do not sell merely because all ownership tokens are deployed.
- // Holding valuable land is preferable to selling and immediately buying it back.
+ // If no development or acquisition is available, a profitable discard can
+ // collect subsidy and cycle the market instead of an empty turn.
+ if(botDiscard(pi))return true;
  return false
 }
 function botTurn(){
