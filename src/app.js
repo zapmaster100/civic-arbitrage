@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0921-55';
+const BUILD_ID='CA-0921-56';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -35,7 +35,7 @@ function edgeConnected(key){if(!roads.size)return true;const [o,a,b]=key.split('
 function parcelEdges(x){return ['N','W',...(x.r===CONFIG.height-1?['S']:[]),...(x.c===CONFIG.width-1?['E']:[])].map(side=>{const key=edgeKey(x.r,x.c,side),built=roads.has(key);return `<span class="parcelroad ${side} ${built?'built':mode==='road'?'available':'hiddenedge'}" data-edge="${key}" title="${built?'Road':'Build road'}"></span>`}).join('')}
 const PIP_CODES={greenfield:[3],residential:{1:[1,2,3],2:[1,2,4],3:[1,4,5]},commercial:{1:[2,3,6],2:[2,4,6],3:[4,5,6]}};
 function pipCode(use,density){if(use==='greenfield'||!density)return PIP_CODES.greenfield;return PIP_CODES[use]?.[density]||[]}
-function pipRail(code,side){return `<span class="piprail ${side}">${[1,2,3,4,5,6].map(i=>`<i class="${code.includes(i)?'on':''}"></i>`).join('')}</span>`}
+function pipRail(code,side){return `<span class="piprail ${side}">${[1,2,3,4,5,6].map(i=>`<i class="pippos p${i} ${code.includes(i)?'on':''}"></i>`).join('')}</span>`}
 function parcelPips(x){if(x.municipal)return '';const code=pipCode(x.zone,x.density);return ['N','E','S','W'].map(side=>pipRail(code,side)).join('')}
 function pipSupport(x,use,density){const code=pipCode(use,density);let total=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc);const nc=n&&!n.municipal?pipCode(n.zone,n.density):PIP_CODES.greenfield;total+=code.filter(p=>nc.includes(p)).length});return total}
 function rulesContent(){return `
