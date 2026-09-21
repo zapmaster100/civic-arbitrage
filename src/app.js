@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-32';
+const BUILD_ID='CA-0920-33';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -182,20 +182,36 @@ function botZone(pi){
  parcels.filter(x=>x.owner===pi).forEach(x=>{
   for(const use of ['residential','commercial'])for(const density of [1,2,3]){
    if(x.zone===use&&x.density===density)continue;
+   // Bots only rezone when it advances a concrete building plan.
+   // An existing building can only redevelop upward in the same use.
+   if(x.building){
+    const oldUse=x.buildingUse||x.zone,oldDensity=x.buildingDensity||1;
+    if(use!==oldUse||density<=oldDensity)continue;
+   }
+   const candidateCards=market.filter(c=>c&&c.use===use&&c.density===density);
+   if(!candidateCards.length)continue;
    const yes=councilOdds(x,use,density);
    if(yes<5)continue;
-   const score=yes+density*2+(pi===0?value(x):0);
+   let buildable=false;
+   for(const c of candidateCards){
+    const oldTurn=turn,oldZone=x.zone,oldDensity=x.density;
+    turn=pi;x.zone=use;x.density=density;
+    buildable=legalBuild(x,c);
+    x.zone=oldZone;x.density=oldDensity;turn=oldTurn;
+    if(buildable)break
+   }
+   if(!buildable)continue;
+   const score=yes+density*3+(pi===0?value(x):0);
    if(!best||score>best.score)best={x,use,density,yes,score}
   }
  });
  if(!best)return false;
  const draw=drawCouncil(best.yes);
+ snap();
  if(draw>=4){
-  snap();best.x.zone=best.use;best.x.density=best.density;
+  best.x.zone=best.use;best.x.density=best.density;
   logEvent(players[pi].name+' rezoned '+best.x.id+' to '+best.use+' '+('●'.repeat(best.density))+' — Council passed '+draw+'-'+(7-draw));
- }else{
-  snap();logEvent(players[pi].name+' failed to rezone '+best.x.id+' — Council '+draw+'-'+(7-draw))
- }
+ }else logEvent(players[pi].name+' failed to rezone '+best.x.id+' — Council '+draw+'-'+(7-draw));
  spendAction();render();return true
 }
 function botAcquire(pi){
