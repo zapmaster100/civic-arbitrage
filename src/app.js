@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-33';
+const BUILD_ID='CA-0920-34';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -225,12 +225,12 @@ function botSell(pi){
  owned.sort((a,b)=>value(b)-value(a));mode='sell';parcelClick(owned[0].id);return true
 }
 function botAct(){
- const pi=turn,p=players[pi];
+ const pi=turn;
  if(botBuild(pi))return true;
- if(p.tokens===0&&p.cash<2&&botSell(pi))return true;
  if(botZone(pi))return true;
  if(botAcquire(pi))return true;
- if(p.tokens===0&&botSell(pi))return true;
+ // Do not sell merely because all ownership tokens are deployed.
+ // Holding valuable land is preferable to selling and immediately buying it back.
  return false
 }
 function botTurn(){
