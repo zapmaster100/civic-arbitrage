@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-28';
+const BUILD_ID='CA-0920-29';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -63,7 +63,10 @@ function parcelClick(id){
   logEvent(p.name+' drafted '+id);
   draftPick+=1;
   if(draftPick>=draftOrder.length){setupDraft=false;turn=0;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;}
-  render();return
+  render();
+  if(setupDraft&&players[draftOrder[draftPick]].bot)setTimeout(botDraft,350);
+  else if(!setupDraft&&players[turn].bot)setTimeout(botTurn,500);
+  return
  }
  if(mode==='building'&&pendingBuilding!==null){
   if(legalBuild(x,market[pendingBuilding]))return placeBuilding(x);
