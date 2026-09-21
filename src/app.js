@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-34';
+const BUILD_ID='CA-0920-35';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -214,6 +214,35 @@ function botZone(pi){
  }else logEvent(players[pi].name+' failed to rezone '+best.x.id+' — Council '+draw+'-'+(7-draw));
  spendAction();render();return true
 }
+function botRoad(pi){
+ const p=players[pi];
+ if(p.cash<CONFIG.roadCost)return false;
+ // Prefer a road edge that gives frontage to owned parcels which are short of frontage.
+ let choices=[];
+ parcels.filter(x=>x.owner===pi).forEach(x=>{
+  const target=x.zone==='commercial'?CONFIG.frontage.commercial[Math.max(1,x.density)]:CONFIG.frontage.residential[Math.max(1,x.density)];
+  const need=Math.max(0,target-frontage(x));
+  for(const side of ['N','S','W','E']){
+   const key=edgeKey(x.r,x.c,side);
+   if(roads.has(key)||!edgeConnected(key))continue;
+   choices.push({key,score:need*5+(x.building?0:2)+value(x)});
+  }
+ });
+ if(!choices.length)return false;
+ choices.sort((a,b)=>b.score-a.score);
+ mode='road';roadSegments=0;
+ buildRoad(choices[0].key);
+ // If possible, use the second free segment of the same road action.
+ const second=[];
+ parcels.filter(x=>x.owner===pi).forEach(x=>{
+  for(const side of ['N','S','W','E']){
+   const key=edgeKey(x.r,x.c,side);
+   if(!roads.has(key)&&edgeConnected(key))second.push(key)
+  }
+ });
+ if(roadSegments===1&&p.cash>=CONFIG.roadCost&&second.length)buildRoad(second[0]);
+ return true
+}
 function botAcquire(pi){
  const p=players[pi];if(p.tokens<1)return false;
  const choices=parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner)&&value(x)<=p.cash).sort((a,b)=>botScoreParcel(b,pi)-botScoreParcel(a,pi));
@@ -228,6 +257,8 @@ function botAct(){
  const pi=turn;
  if(botBuild(pi))return true;
  if(botZone(pi))return true;
+ // Roads are infrastructure for future builds, so try them before buying more land.
+ if(botRoad(pi))return true;
  if(botAcquire(pi))return true;
  // Do not sell merely because all ownership tokens are deployed.
  // Holding valuable land is preferable to selling and immediately buying it back.
