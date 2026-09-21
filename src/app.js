@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0920-40';
+const BUILD_ID='CA-0920-41';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -29,7 +29,7 @@ function restore(raw){const q=JSON.parse(raw);players.splice(0,players.length,..
 function snap(){try{history.push(state())}catch(e){console.error('Snapshot failed',e)}}
 function undo(){if(actionStart){restore(actionStart);actionStart=null;if(history.length)history.pop();render();return}if(!history.length)return;restore(history.pop());render()}
 function spendAction(){actions--}
-function setMode(m){if(setupDraft||actions<=0)return;actionStart=null;mode=m;selected=null;pendingBuilding=null;pendingCouncil=null;roadSegments=0;render()}
+function setMode(m){if(setupDraft||actions<=0)return;if(m!=='building'&&!selected)return;actionStart=null;mode=m;selected=null;pendingBuilding=null;pendingCouncil=null;roadSegments=0;render()}
 function edgeKey(r,c,side){if(side==='N')return 'H:'+r+':'+c;if(side==='S')return 'H:'+(r+1)+':'+c;if(side==='W')return 'V:'+r+':'+c;return 'V:'+r+':'+(c+1)}
 function edgeConnected(key){if(!roads.size)return true;const [o,a,b]=key.split(':'),r=+a,c=+b;const ends=o==='H'?[[r,c],[r,c+1]]:[[r,c],[r+1,c]];for(const k of roads){const [oo,aa,bb]=k.split(':'),rr=+aa,cc=+bb;const ee=oo==='H'?[[rr,cc],[rr,cc+1]]:[[rr,cc],[rr+1,cc]];if(ends.some(e=>ee.some(q=>q[0]===e[0]&&q[1]===e[1])))return true}return false}
 function parcelEdges(x){return ['N','W',...(x.r===CONFIG.height-1?['S']:[]),...(x.c===CONFIG.width-1?['E']:[])].map(side=>{const key=edgeKey(x.r,x.c,side),built=roads.has(key);return `<span class="parcelroad ${side} ${built?'built':mode==='road'?'available':'hiddenedge'}" data-edge="${key}" title="${built?'Road':'Build road'}"></span>`}).join('')}
@@ -38,16 +38,28 @@ function render(){
  const p=players[draftPlayer];
  document.querySelector('#app').innerHTML=`
  <header><div><h1>Civic Arbitrage</h1><p>Playas de México · v0.1 prototype · <b>Build ${BUILD_ID}</b></p></div><div class="turn"><span class="playerdisc p${p.i}"></span><b>${p.name}</b> · <strong>${setupDraft?`Starting draft — pick ${draftPick+1}/8`:`${actions}/2 actions`}</strong></div></header>
- <div class="actionbar ${setupDraft?'disabled':''}">${[['acquire','Acquire'],['sell','Sell'],['road','Build Road'],['zone','Zone / Rezone'],['building','Take Building']].map(([m,l])=>`<button class="${mode===m?'active':''}" data-mode="${m}">${l}</button>`).join('')}<button id="undo" class="undo" ${history.length?'':'disabled'}>↶ Undo</button></div>
+ <div class="actionbar ${setupDraft?'disabled':''}">${[['acquire','Acquire'],['sell','Sell'],['road','Build Road'],['zone','Zone / Rezone'],['building','Take Building']].map(([m,l])=>`<button class="${mode===m?'active':''}" data-mode="${m}" ${!selected&&m!=='building'?'disabled':''}>${l}</button>`).join('')}<button id="undo" class="undo" ${history.length?'':'disabled'}>↶ Undo</button></div>
  <main><section><div class="boardwrap"><div class="board">${parcels.map(x=>`<button class="parcel ${x.zone} ${x.water?'water':''} ${x.municipal?'civic':''} ${selected===x.id?'selected':''} ${pendingBuilding!==null&&legalBuild(x,market[pendingBuilding])?'legalbuild':''}" data-id="${x.id}"><span>${x.id}</span>${x.building?`<b class="building">${x.building}</b>`:''}${Number.isInteger(x.owner)?`<i class="ownerdisc p${x.owner}"></i>`:''}${x.density?`<em>${'●'.repeat(x.density)}</em>`:''}<small>${value(x)}</small>${!setupDraft?parcelEdges(x):''}</button>`).join('')}</div></div>
  <div class="sea">COAST — prototype geography</div>
  <div class="market"><h2>Building Market</h2>${[0,1].map(row=>`<div class="marketrow">${market.slice(row*5,row*5+5).map((c,j)=>c?`<button class="card" data-card="${row*5+j}"><b>${c.name}</b><span>${c.use}</span><strong>${'●'.repeat(c.density)}</strong><small>Subsidy ${c.coins} · Skip ${j}</small></button>`:`<div class="card card-empty" aria-label="Empty market slot"></div>`).join('')}</div>`).join('')}<div class="municipal-staging">Municipal staging — empty</div></div></section>
- <aside><h2><span class="playerdisc p${p.i}"></span>${p.name}</h2><div class="money">Hidden cash: $<b>${p.cash}</b></div><p>Tokens available: ${p.tokens}</p><h3>${setupDraft?'Starting parcel draft':'Action: '+modeLabel()}</h3><p>${setupDraft?'Choose any parcel except Municipal land. Existing private buildings may be acquired; pay $0 during the starting draft.':help()}</p>${mode==='zone'&&selected&&!pendingCouncil?zoneControls():''}${pendingCouncil?councilControls():''}${pendingBuilding!==null?buildingControls():''}${actions<=0&&!setupDraft?'<div class="noactions"><b>No more actions.</b> End your turn.</div>':''}<button id="end" ${setupDraft?'disabled':''}>${actions<=0?'End Turn':'End turn early'}</button><hr><h3>Growth</h3><p>Population ${population} / Jobs ${jobs}</p><p>Thresholds: 4 → 9 → 15</p><hr><h3>Game Log</h3><div class="gamelog">${gameLog.length?gameLog.slice().reverse().map(msg=>'<div>'+msg+'</div>').join(''):'<div>No actions yet.</div>'}</div></aside></main>`;
+ <aside><h2><span class="playerdisc p${p.i}"></span>${p.name}</h2><div class="money">Hidden cash: $<b>${p.cash}</b></div><p>Tokens available: ${p.tokens}</p>${!setupDraft?parcelLegend():''}<h3>${setupDraft?'Starting parcel draft':selected?'Choose an action':'Select a parcel'}</h3><p>${setupDraft?'Choose any parcel except Municipal land. Existing private buildings may be acquired; pay $0 during the starting draft.':help()}</p>${mode==='zone'&&selected&&!pendingCouncil?zoneControls():''}${pendingCouncil?councilControls():''}${pendingBuilding!==null?buildingControls():''}${actions<=0&&!setupDraft?'<div class="noactions"><b>No more actions.</b> End your turn.</div>':''}<button id="end" ${setupDraft?'disabled':''}>${actions<=0?'End Turn':'End turn early'}</button><hr><h3>Growth</h3><p>Population ${population} / Jobs ${jobs}</p><p>Thresholds: 4 → 9 → 15</p><hr><h3>Game Log</h3><div class="gamelog">${gameLog.length?gameLog.slice().reverse().map(msg=>'<div>'+msg+'</div>').join(''):'<div>No actions yet.</div>'}</div></aside></main>`;
  document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));document.querySelectorAll('.parcel').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();parcelClick(el.dataset.id)}));document.querySelectorAll('.card').forEach(e=>e.onclick=()=>takeCard(+e.dataset.card));document.querySelectorAll('[data-edge]').forEach(e=>e.onclick=ev=>{ev.stopPropagation();buildRoad(e.dataset.edge)});document.querySelectorAll('[data-zone]').forEach(e=>e.onclick=()=>applyZone(e.dataset.zone,+e.dataset.density));document.querySelectorAll('[data-buildchoice]').forEach(e=>e.onclick=()=>buildingChoice(e.dataset.buildchoice));document.querySelectorAll('[data-council]').forEach(e=>e.onclick=()=>councilChoice(e.dataset.council));document.querySelector('#end').onclick=endTurn;document.querySelector('#undo').onclick=undo;
+}
+function parcelLegend(){
+ if(!selected)return '<div class="parcellegend"><h3>Parcel details</h3><p>Select a parcel on the board first.</p></div>';
+ const x=parcels.find(q=>q.id===selected);if(!x)return '';
+ const owner=Number.isInteger(x.owner)?players[x.owner].name:'Unowned';
+ const zone=x.zone==='greenfield'?'Greenfield':x.zone+' '+('●'.repeat(x.density));
+ const building=x.building?x.building+' '+('●'.repeat(x.buildingDensity||1)):'None';
+ let vote='';
+ if(mode==='zone'){
+  vote='<p><b>Council neighbours</b></p><div class="votebox">'+[['N',-1,0],['S',1,0],['E',0,1],['W',0,-1]].map(([d,dr,dc])=>{const n=at(x.r+dr,x.c+dc);return '<div><b>'+d+'</b>: '+(n?(n.zone==='greenfield'?'Greenfield':n.zone+' '+('●'.repeat(n.density))):'Edge')+'</div>'}).join('')+'</div><p>Choose proposed zoning below to preview the 12-cube Council bag before drawing.</p>';
+ }
+ return '<div class="parcellegend"><h3>Parcel '+x.id+'</h3><p><b>Owner:</b> '+owner+'<br><b>Zoning:</b> '+zone+'<br><b>Building:</b> '+building+'<br><b>Frontage:</b> '+frontage(x)+'<br><b>Land value:</b> $'+value(x)+'</p>'+vote+'</div>'
 }
 function modeLabel(){return {acquire:'Acquire parcel',sell:'Sell parcel',road:'Build Road',zone:'Zone / Rezone',building:'Take Building'}[mode]}
 function help(){return {acquire:'Click any parcel not owned by a player. Existing private buildings do not block ownership. Municipal parcels cannot be owned. Pay current zoning/land value.',sell:'Click one of your parcels to sell it at current land value. Buildings and zoning remain.',road:'Place up to 2 connected public road segments for 1 action. Each segment costs $1. New roads must connect to the road network.',zone:'Click one of your parcels, then choose proposed zoning.',building:'Choose a card from either market row. Skip payments are automatic.'}[mode]}
-function zoneControls(){return `<div class="zonecontrols">${['residential','commercial','municipal'].map(z=>`<div><b>${z}</b> ${[1,2,3].map(d=>`<button data-zone="${z}" data-density="${d}">${'●'.repeat(d)}</button>`).join('')}</div>`).join('')}</div>`}
+function zoneControls(){const x=parcels.find(q=>q.id===selected);return `<div class="zonecontrols"><p><b>Proposed zoning — preview Council bag</b></p>${['residential','commercial','municipal'].map(z=>`<div><b>${z}</b> ${[1,2,3].map(d=>{const yes=councilOdds(x,z,d);return `<button data-zone="${z}" data-density="${d}">${'●'.repeat(d)} · ${yes}Y/${12-yes}N</button>`}).join('')}</div>`).join('')}</div>`}
 function frontage(x){return ['N','S','E','W'].reduce((n,side)=>n+(roads.has(edgeKey(x.r,x.c,side))?1:0),0)+(x.water?1:0)}
 function buildProblem(x,c){if(x.owner!==turn)return 'You do not own this parcel.';if(x.municipal)return 'Municipal land cannot take a private building.';if(x.building){const oldDensity=x.buildingDensity||1,oldUse=x.buildingUse||x.zone;if(c.use!==oldUse)return `Redevelopment must stay ${oldUse}; an existing ${x.building} cannot be replaced by ${c.use}.`;if(c.density<=oldDensity)return `Redevelopment must increase density above the existing ${x.building} (${'●'.repeat(oldDensity)}).`;}if(x.zone!==c.use)return `Wrong zoning: this building requires ${c.use}.`;if(x.density<c.density)return `Zoning is too low: this building requires ${'●'.repeat(c.density)} density.`;if(frontage(x)<CONFIG.frontage[c.use][c.density])return `Not enough frontage: requires ${CONFIG.frontage[c.use][c.density]}, but this parcel has ${frontage(x)}.`;if(c.density>1){const needUse=c.use==='residential'?'commercial':'residential',needDensity=c.density-1;let found=false;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;const n=at(x.r+dr,x.c+dc);if(n&&n.building&&(n.buildingUse||n.zone)===needUse&&(n.buildingDensity||1)>=needDensity)found=true}if(!found)return `Missing nearby prerequisite: needs a built ${needUse} ${'●'.repeat(needDensity)} within the 8 surrounding parcels.`;}return null}
 function legalBuild(x,c){return !buildProblem(x,c)}
@@ -69,6 +81,7 @@ function parcelClick(id){
   else if(!setupDraft&&players[turn].bot)setTimeout(botTurn,500);
   return
  }
+ if(mode!=='building'){selected=id;render();return}
  if(mode==='building'&&pendingBuilding!==null){
   if(legalBuild(x,market[pendingBuilding]))return placeBuilding(x);
   return alert(buildProblem(x,market[pendingBuilding])||'That parcel is not a legal location for this building.');
@@ -85,7 +98,6 @@ function parcelClick(id){
   const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
   logEvent(p.name+' sold '+id+' for $'+sale);render();return
  }
- if(mode==='zone'&&x.owner===turn){selected=id;render()}
 }
 function buildRoad(key){
  if(mode!=='road'||setupDraft||roads.has(key)||roadSegments>=2||(actions<=0&&roadSegments===0))return;
