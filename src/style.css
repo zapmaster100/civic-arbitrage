@@ -42,3 +42,13 @@
 .parcel .piprail.E{right:3px!important}.parcel .piprail.W{left:3px!important}
 .parcel .piprail i{position:static!important;display:block!important;width:5px!important;height:5px!important;min-width:5px!important;min-height:5px!important;margin:auto!important;padding:0!important;border-radius:50%!important;background:transparent!important;border:1px solid rgba(30,25,18,.24)!important;box-sizing:border-box!important;transform:none!important}
 .parcel .piprail i.on{background:#241f19!important;border-color:#241f19!important}
+
+/* CA-0921-55: compact edge strips; keep pips clear of parcel content */
+.parcel .piprail.N,.parcel .piprail.S{left:26px!important;right:26px!important}
+.parcel .piprail.E,.parcel .piprail.W{top:26px!important;bottom:26px!important}
+.parcel .piprail i{width:3px!important;height:3px!important;min-width:3px!important;min-height:3px!important;border-width:1px!important}
+@media (max-width:760px){
+ .parcel .piprail.N,.parcel .piprail.S{left:22px!important;right:22px!important}
+ .parcel .piprail.E,.parcel .piprail.W{top:22px!important;bottom:22px!important}
+ .parcel .piprail i{width:3px!important;height:3px!important;min-width:3px!important;min-height:3px!important}
+}
