@@ -1,12 +1,12 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0921-50';
+const BUILD_ID='CA-0921-51';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
 const draftOrder=[0,1,2,3,3,2,1,0], rows='ABCDEFG'.split('');
 const parcels=[], roads=new Set(), history=[];
 const gameLog=[];
-const botPlans=[null,null,null,null],botFailedZones=[new Set(),new Set(),new Set(),new Set()];
+const botPlans=[null,null,null,null],botFailedZones=[new Set(),new Set(),new Set(),new Set()],botLastSold=[null,null,null,null];
 function logEvent(msg){gameLog.push(msg);if(gameLog.length>50)gameLog.shift();}
 for(let r=0;r<CONFIG.height;r++)for(let c=0;c<CONFIG.width;c++)parcels.push({id:rows[r]+(c+1),r,c,owner:null,zone:'greenfield',density:0,building:null,water:r===6,municipal:false});
 const plaza={r:1,c:5};
@@ -164,7 +164,7 @@ function buildingChoice(choice){
 }
 function endTurn(){
  if(setupDraft)return;
- botPlans[turn]=null;botFailedZones[turn].clear();
+ botPlans[turn]=null;botFailedZones[turn].clear();botLastSold[turn]=null;
  const ending=players[turn].name;
  if(actionStart)actionStart=null;
  snap();pendingCouncil=null;roadSegments=0;refreshMarket();turn=(turn+1)%players.length;actions=CONFIG.actions;mode='acquire';selected=null;pendingBuilding=null;
@@ -326,13 +326,17 @@ function botRoadTowardOwned(pi){
 }
 function botAcquire(pi){
  const p=players[pi];if(p.tokens<1)return false;
- const choices=parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner)&&value(x)<=p.cash).sort((a,b)=>botScoreParcel(b,pi)-botScoreParcel(a,pi));
+ let choices=parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner)&&value(x)<=p.cash&&x.id!==botLastSold[pi]);
  if(!choices.length)return false;
+ // Prefer fresh land first, then zoned parcels that do not already contain a private building.
+ // Buying an already-built parcel is only a fallback when there is no better land to develop.
+ const tier=x=>x.zone==='greenfield'&&!x.building?2:(!x.building?1:0);
+ choices.sort((a,b)=>tier(b)-tier(a)||botScoreParcel(b,pi)-botScoreParcel(a,pi));
  mode='acquire';parcelClick(choices[0].id);return true
 }
 function botSell(pi){
  const owned=parcels.filter(x=>x.owner===pi);if(!owned.length)return false;
- owned.sort((a,b)=>value(b)-value(a));mode='sell';parcelClick(owned[0].id);return true
+ owned.sort((a,b)=>value(b)-value(a));const sold=owned[0];botLastSold[pi]=sold.id;mode='sell';parcelClick(sold.id);return true
 }
 function botAct(){
  const pi=turn;
