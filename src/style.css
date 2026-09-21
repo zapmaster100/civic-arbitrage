@@ -33,3 +33,12 @@
 .zonecontrols button.zonepass{box-shadow:inset 0 0 0 2px rgba(20,110,55,.55)}
 .zonecontrols button.zonefail{opacity:.68}
 .zonerule{font-size:.85rem;margin:.55rem 0 0}
+
+/* CA-0921-54: explicit pip geometry; avoids inherited/global i styles on mobile */
+.parcel .piprail{position:absolute!important;display:grid!important;pointer-events:none!important;z-index:6!important;gap:0!important;margin:0!important;padding:0!important}
+.parcel .piprail.N,.parcel .piprail.S{left:10px!important;right:10px!important;width:auto!important;height:6px!important;grid-template-columns:repeat(6,1fr)!important;grid-template-rows:6px!important;align-items:center!important}
+.parcel .piprail.N{top:3px!important}.parcel .piprail.S{bottom:3px!important}
+.parcel .piprail.E,.parcel .piprail.W{top:10px!important;bottom:10px!important;height:auto!important;width:6px!important;grid-template-rows:repeat(6,1fr)!important;grid-template-columns:6px!important;align-items:center!important}
+.parcel .piprail.E{right:3px!important}.parcel .piprail.W{left:3px!important}
+.parcel .piprail i{position:static!important;display:block!important;width:5px!important;height:5px!important;min-width:5px!important;min-height:5px!important;margin:auto!important;padding:0!important;border-radius:50%!important;background:transparent!important;border:1px solid rgba(30,25,18,.24)!important;box-sizing:border-box!important;transform:none!important}
+.parcel .piprail i.on{background:#241f19!important;border-color:#241f19!important}
