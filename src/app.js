@@ -104,7 +104,7 @@ function parcelClick(id){
   if(Number.isInteger(x.owner))return alert('That parcel is already owned by a player.');
   const cost=value(x);if(p.cash<cost)return alert('Not enough cash for that starting parcel.');
   snap();x.owner=pi;p.tokens=Math.max(0,p.tokens-1);p.cash-=cost;if(!p.owned.includes(id))p.owned.push(id);
-  logEvent(p.name+' drafted '+id+' for 
+  logEvent(p.name+' drafted '+id+' for '+cost+' dollars');
   draftPick+=1;
   if(draftPick>=draftOrder.length){setupDraft=false;turn=0;actions=CONFIG.actions;mode='trade';selected=null;pendingBuilding=null;}
   render();
@@ -122,7 +122,12 @@ function parcelClick(id){
  if(mode==='trade'&&!Number.isInteger(x.owner)){
   const cost=value(x);if(p.tokens<1||p.cash<cost)return alert('Not enough cash or ownership tokens.');
   snap();x.owner=turn;p.tokens--;p.cash-=cost;p.owned.push(id);spendAction();
-  logEvent(p.name+' bought '+id+' for 
+  logEvent(p.name+' bought '+id+' for '+cost+' dollars');render();return
+ }
+ if(mode==='trade'&&x.owner===turn){
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  logEvent(p.name+' sold '+id+' for '+sale+' dollars');render();return
+ }
  if(mode==='zone'&&x.owner===turn){selected=id;render()}
 }
 function buildRoad(key){
