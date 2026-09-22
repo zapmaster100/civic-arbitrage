@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0922-66';
+const BUILD_ID='CA-0922-67';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false;
@@ -54,19 +54,18 @@ function rulesContent(){return `
 <p>Each player is a private developer shaping one shared growing city, but everyone is pursuing their own profit. Roads, zoning and buildings created by one player can increase the value and development potential of somebody else's land. Read where the city is going, secure the right parcels, and profit from the city your opponents create.</p>
 <p>There is no visible victory-point score. Cash is hidden. At the end of the game, hidden cash plus the current value of property you still own is your total wealth. Highest wealth wins.</p>
 <h3>Your Turn</h3><p>Take <b>2 actions</b>. Actions may be repeated.</p>
-<h3>1. Acquire Parcel</h3>
-<p>Acquire any unowned non-Municipal parcel by paying its current land value and placing an ownership token. Existing private buildings do not prevent acquisition.</p>
+<h3>1. Sell / Buy Parcel</h3>
+<p>As one action, you may sell one parcel and then buy one parcel. You may also only buy or only sell. Buy and sell at current land value; selling recovers the ownership token. Zoning, buildings and roads remain.</p>
 <p><b>Land value</b> = the parcel's own zoning value + the zoning values of its orthogonal neighbours. Low ● = $1, Medium ●● = $2, High ●●● = $3. Greenfield = $0. A waterfront edge mirrors the parcel's own zoning value. Buildings themselves add no land value.</p>
-<h3>2. Sell Parcel</h3>
-<p>Sell one of your parcels to the bank for its current land value and recover your ownership token. Zoning, buildings and roads remain, and the parcel becomes available to acquire again.</p>
-<h3>3. Build Road</h3>
+<p>During setup, drafted starting parcels are purchased at their current land value.</p>
+<h3>2. Build Road</h3>
 <p>Build up to <b>2 connected road segments</b> for $1 each. New roads must connect to the existing network. Roads are public and each road edge provides 1 frontage. Water does not count as frontage.</p>
-<h3>4. Zone / Rezone</h3>
+<h3>3. Zone / Rezone</h3>
 <p>Choose one of your parcels and propose Residential or Commercial zoning at Low ●, Medium ●● or High ●●● density.</p>
 <p><b>Border support:</b> zoning tiles have six possible pip positions around their edges. Compare the proposed tile with its four orthogonal neighbours and count the pips that align. Same use + same density gives 3 matches; different use + same density gives 2; same use one density apart gives 2; different use one apart gives 1; same use two apart gives 1; different use two apart gives 0. Greenfield matches Low once and Medium/High zero times.</p>
 <p>A beachfront parcel treats its ocean boundary as <b>all six pip positions</b>, so the ocean fully supports any proposed private zoning pattern on that edge.</p>
 <p>Add all four borders. <b>6 or more matching pips permits the rezoning.</b> There is no Council draw or redraw.</p>
-<h3>5. Take Building</h3>
+<h3>4. Take Building</h3>
 <p>Choose a card from the building market. Pay $1 onto each occupied card you pass. When you take a card, you collect the subsidy already on it.</p>
 <p><b>Place:</b> construct it on a legal parcel and receive the $5 building payout plus its subsidy. <b>Discard:</b> construct nothing and collect only its subsidy. Cancel before confirming to leave the market unchanged.</p>
 <p>The parcel needs the correct use, sufficient zoning density and frontage. Residential frontage is 2 / 2 / 3 and Commercial is 2 / 3 / 4 for Low / Medium / High.</p>
@@ -88,8 +87,8 @@ function render(){
  <aside><h2><span class="playerdisc p${p.i}"></span>${p.name}</h2><div class="money">Hidden cash: $<b>${p.cash}</b></div><p>Tokens available: ${p.tokens}</p><h3>${setupDraft?'Starting parcel draft':'Action: '+modeLabel()}</h3><p>${setupDraft?'Choose any parcel except Municipal land. Existing private buildings may be acquired; pay $0 during the starting draft.':help()}</p>${mode==='zone'&&selected&&!pendingCouncil?zoneControls():''}${pendingCouncil?councilControls():''}${pendingBuilding!==null?buildingControls():''}${actions<=0&&!setupDraft?'<div class="noactions"><b>No more actions.</b> End your turn.</div>':''}<button id="end" ${setupDraft?'disabled':''}>${actions<=0?'End Turn':'End turn early'}</button><hr><h3>Growth</h3><p>Population ${population} / Jobs ${jobs}</p><p>Thresholds: 4 → 9 → 15</p><hr><h3>Game Log</h3><div class="gamelog">${gameLog.length?gameLog.slice().reverse().map(msg=>'<div>'+msg+'</div>').join(''):'<div>No actions yet.</div>'}</div></aside></main><div id="rulesModal" class="rulesmodal" hidden><div class="rulespanel"><button id="rulesClose" class="rulesclose" type="button">×</button>${rulesContent()}</div></div>`;
  document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));document.querySelectorAll('.parcel').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();parcelClick(el.dataset.id)}));document.querySelectorAll('.card').forEach(e=>e.onclick=()=>takeCard(+e.dataset.card));document.querySelectorAll('[data-edge]').forEach(e=>e.onclick=ev=>{ev.stopPropagation();buildRoad(e.dataset.edge)});document.querySelectorAll('[data-zone]').forEach(e=>e.onclick=()=>applyZone(e.dataset.zone,+e.dataset.density));document.querySelectorAll('[data-buildchoice]').forEach(e=>e.onclick=()=>buildingChoice(e.dataset.buildchoice));document.querySelectorAll('[data-council]').forEach(e=>e.onclick=()=>councilChoice(e.dataset.council));document.querySelector('#end').onclick=endTurn;document.querySelector('#undo').onclick=undo;document.querySelector('#rulesBtn').onclick=()=>{document.querySelector('#rulesModal').hidden=false};document.querySelector('#rulesClose').onclick=()=>{document.querySelector('#rulesModal').hidden=true};document.querySelector('#rulesModal').onclick=e=>{if(e.target.id==='rulesModal')e.currentTarget.hidden=true};
 }
-function modeLabel(){return {acquire:'Acquire parcel',sell:'Sell parcel',road:'Build Road',zone:'Zone / Rezone',building:'Take Building'}[mode]}
-function help(){return {acquire:'Click any parcel not owned by a player. Existing private buildings do not block ownership. Municipal parcels cannot be owned. Pay current zoning/land value.',sell:'Click one of your parcels to sell it at current land value. Buildings and zoning remain.',road:'Place up to 2 connected public road segments for 1 action. Each segment costs $1. New roads must connect to the road network.',zone:'Click one of your parcels, then choose proposed zoning.',building:'Choose a card from either market row. Skip payments are automatic.'}[mode]}
+function modeLabel(){return {trade:'Sell / Buy',road:'Build Road',zone:'Zone / Rezone',building:'Take Building'}[mode]}
+function help(){return {trade:'Sell a parcel and then buy another as one action, or simply buy or sell once. Parcels trade at current land value; zoning and buildings remain.',road:'Place up to 2 connected public road segments for 1 action. Each segment costs $1. New roads must connect to the road network.',zone:'Click one of your parcels, then choose proposed zoning.',building:'Choose a card from either market row. Skip payments are automatic.'}[mode]}
 function zoneControls(){const x=parcels.find(q=>q.id===selected);return `<div class="zonecontrols"><p><b>Proposed zoning — border support</b></p>${['residential','commercial'].map(z=>`<div><b>${z}</b> ${[1,2,3].map(d=>{const support=pipSupport(x,z,d);return `<button data-zone="${z}" data-density="${d}" class="${support>=6?'zonepass':'zonefail'}">${'●'.repeat(d)} · ${support}/12 ${support>=6?'✓':'×'}</button>`}).join('')}</div>`).join('')}<p class="zonerule">6+ matching border pips = permitted.</p></div>`}
 function frontage(x){return ['N','S','E','W'].reduce((n,side)=>n+(roads.has(edgeKey(x.r,x.c,side))?1:0),0)}
 function buildProblem(x,c){if(x.owner!==turn)return 'You do not own this parcel.';if(x.municipal)return 'Municipal land cannot take a private building.';if(x.building){const oldDensity=x.buildingDensity||1;if(c.density<=oldDensity)return `Redevelopment must increase density above the existing ${x.building} (${'●'.repeat(oldDensity)}).`;}if(x.zone!==c.use)return `Wrong zoning: this building requires ${c.use}.`;if(x.density<c.density)return `Zoning is too low: this building requires ${'●'.repeat(c.density)} density.`;if(frontage(x)<CONFIG.frontage[c.use][c.density])return `Not enough frontage: requires ${CONFIG.frontage[c.use][c.density]}, but this parcel has ${frontage(x)}.`;if(c.density>1){const needUse=c.use==='residential'?'commercial':'residential',needDensity=c.density-1;let found=false;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;const n=at(x.r+dr,x.c+dc);if(n&&n.building&&(n.buildingUse||n.zone)===needUse&&(n.buildingDensity||1)>=needDensity)found=true}if(!found)return `Missing nearby prerequisite: needs a built ${needUse} ${'●'.repeat(needDensity)} within the 8 surrounding parcels.`;}return null}
@@ -118,7 +117,7 @@ function parcelClick(id){
   return alert(buildProblem(x,market[pendingBuilding])||'That parcel is not a legal location for this building.');
  }
  if(x.municipal)return alert('Municipal parcels cannot be privately owned.');
- if(actions<=0)return;
+ if(actions<=0&&!(mode==='trade'&&tradeSalePending&&!Number.isInteger(x.owner)))return;
  const p=players[turn];
  if(mode==='trade'&&!Number.isInteger(x.owner)){
   const cost=value(x);if(p.tokens<1||p.cash<cost)return alert('Not enough cash or ownership tokens.');
@@ -347,6 +346,34 @@ function botAcquire(pi){
  choices.sort((a,b)=>tier(b)-tier(a)||botScoreParcel(b,pi)-botScoreParcel(a,pi));
  mode='trade';parcelClick(choices[0].id);return true
 }
+function botStrategicSwap(pi){
+ const p=players[pi];
+ // Sell only when a clearly better destination has already been identified.
+ // Sell + Buy is now one action, so this can be used with one action remaining.
+ if(p.tokens>0||actions<1)return false;
+ const owned=parcels.filter(x=>x.owner===pi&&!x.municipal);
+ if(!owned.length)return false;
+ let best=null;
+ for(const target of parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner))){
+  const targetValue=value(target),targetScore=botScoreParcel(target,pi);
+  for(const sold of owned){
+   if(target.id===botLastSold[pi])continue;
+   const saleValue=value(sold);
+   if(p.cash+saleValue<targetValue)continue;
+   const soldScore=botScoreParcel(sold,pi);
+   if(targetScore<soldScore+4)continue;
+   const gain=targetScore-soldScore;
+   if(!best||gain>best.gain)best={sold,target,gain};
+  }
+ }
+ if(!best)return false;
+ botLastSold[pi]=best.sold.id;
+ mode='trade';parcelClick(best.sold.id);
+ if(tradeSalePending&&p.tokens>0&&value(best.target)<=p.cash&&!Number.isInteger(best.target.owner)){
+  parcelClick(best.target.id);
+ }
+ return true
+}
 function botSell(pi){
  const owned=parcels.filter(x=>x.owner===pi);if(!owned.length)return false;
  owned.sort((a,b)=>value(b)-value(a));const sold=owned[0];botLastSold[pi]=sold.id;mode='trade';parcelClick(sold.id);return true
@@ -371,6 +398,8 @@ function botAct(){
  if(botAcquire(pi))return true;
  // A profitable discard is useful if it can raise cash.
  if(botDiscard(pi))return true;
+ // With all tokens committed, relocate one only when a clearly better parcel is available.
+ if(botStrategicSwap(pi))return true;
  // Holding land is better than meaningless buy/sell churn. A bot with no
  // productive action simply ends its turn; selling is reserved for explicit
  // strategic needs rather than being a generic fallback.
