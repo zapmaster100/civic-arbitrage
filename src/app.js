@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0921-60';
+const BUILD_ID='CA-0921-61';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -345,6 +345,35 @@ function botAcquire(pi){
  choices.sort((a,b)=>tier(b)-tier(a)||botScoreParcel(b,pi)-botScoreParcel(a,pi));
  mode='acquire';parcelClick(choices[0].id);return true
 }
+function botStrategicSwap(pi){
+ const p=players[pi];
+ // Only swap when all ownership tokens are committed. Identify the replacement
+ // before selling so the bot never liquidates merely because it is stuck.
+ if(p.tokens>0||actions<2)return false;
+ const owned=parcels.filter(x=>x.owner===pi&&!x.municipal);
+ if(!owned.length)return false;
+ let best=null;
+ for(const target of parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner))){
+  const targetValue=value(target),targetScore=botScoreParcel(target,pi);
+  for(const sold of owned){
+   if(target.id===botLastSold[pi])continue;
+   const saleValue=value(sold);
+   if(p.cash+saleValue<targetValue)continue;
+   const soldScore=botScoreParcel(sold,pi);
+   // Require a clearly better destination; random score noise must not cause churn.
+   if(targetScore<soldScore+4)continue;
+   const gain=targetScore-soldScore;
+   if(!best||gain>best.gain)best={sold,target,gain};
+  }
+ }
+ if(!best)return false;
+ botLastSold[pi]=best.sold.id;
+ mode='sell';parcelClick(best.sold.id);
+ if(actions>0&&p.tokens>0&&value(best.target)<=p.cash&&!Number.isInteger(best.target.owner)){
+  mode='acquire';parcelClick(best.target.id);
+ }
+ return true
+}
 function botSell(pi){
  const owned=parcels.filter(x=>x.owner===pi);if(!owned.length)return false;
  owned.sort((a,b)=>value(b)-value(a));const sold=owned[0];botLastSold[pi]=sold.id;mode='sell';parcelClick(sold.id);return true
@@ -369,9 +398,9 @@ function botAct(){
  if(botAcquire(pi))return true;
  // A profitable discard is useful if it can raise cash.
  if(botDiscard(pi))return true;
- // Holding land is better than meaningless buy/sell churn. A bot with no
- // productive action simply ends its turn; selling is reserved for explicit
- // strategic needs rather than being a generic fallback.
+ // With all tokens committed, sell only when a clearly better replacement
+ // has already been identified and both actions can complete the swap.
+ if(botStrategicSwap(pi))return true;
  return false
 }
 function botTurn(){
