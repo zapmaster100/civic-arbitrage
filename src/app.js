@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0922-67';
+const BUILD_ID='CA-0922-68';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false;
@@ -175,8 +175,31 @@ function endTurn(){tradeSalePending=false;
  if(players[turn].bot)setTimeout(botTurn,500)
 }
 
+function roadNetworkVertices(){
+ const vertices=new Set();
+ for(const key of roads){
+  const [o,a,b]=key.split(':'),r=+a,c=+b;
+  const ends=o==='H'?[[r,c],[r,c+1]]:[[r,c],[r+1,c]];
+  ends.forEach(([rr,cc])=>vertices.add(rr+':'+cc));
+ }
+ return [...vertices].map(s=>s.split(':').map(Number))
+}
+function botRoadDistance(x){
+ if(frontage(x)>0)return 0;
+ const vertices=roadNetworkVertices();if(!vertices.length)return 99;
+ // Approximate number of new road segments needed to reach an edge of this parcel.
+ const corners=[[x.r,x.c],[x.r,x.c+1],[x.r+1,x.c],[x.r+1,x.c+1]];
+ return Math.min(...corners.flatMap(([r,c])=>vertices.map(([rr,cc])=>Math.abs(r-rr)+Math.abs(c-cc))));
+}
 function botScoreParcel(x,pi){
+ const roadDist=botRoadDistance(x);
  let score=value(x)*3+(x.water?4:0);
+ // Infrastructure matters: frontage is best, nearby speculation is viable,
+ // but remote land must be unusually valuable to justify tying up a token.
+ if(roadDist===0)score+=9;
+ else if(roadDist===1)score+=5;
+ else if(roadDist===2)score+=1;
+ else score-=(roadDist-2)*4;
  for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
   if(!dr&&!dc)continue;
   const n=at(x.r+dr,x.c+dc);if(n&&n.building)score+=2
