@@ -1,8 +1,8 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0922-65';
+const BUILD_ID='CA-0922-66';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
-let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
+let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false;
 const draftOrder=[0,1,2,3,3,2,1,0], rows='ABCDEFG'.split('');
 const parcels=[], roads=new Set(), history=[];
 const gameLog=[];
@@ -29,7 +29,7 @@ function restore(raw){const q=JSON.parse(raw);players.splice(0,players.length,..
 function snap(){try{history.push(state())}catch(e){console.error('Snapshot failed',e)}}
 function undo(){if(actionStart){restore(actionStart);actionStart=null;if(history.length)history.pop();render();return}if(!history.length)return;restore(history.pop());render()}
 function spendAction(){actions--}
-function setMode(m){if(setupDraft||actions<=0)return;actionStart=null;mode=m;selected=null;pendingBuilding=null;pendingCouncil=null;roadSegments=0;render()}
+function setMode(m){if(setupDraft||actions<=0)return;actionStart=null;tradeSalePending=false;mode=m;selected=null;pendingBuilding=null;pendingCouncil=null;roadSegments=0;render()}
 function edgeKey(r,c,side){if(side==='N')return 'H:'+r+':'+c;if(side==='S')return 'H:'+(r+1)+':'+c;if(side==='W')return 'V:'+r+':'+c;return 'V:'+r+':'+(c+1)}
 function edgeConnected(key){if(!roads.size)return true;const [o,a,b]=key.split(':'),r=+a,c=+b;const ends=o==='H'?[[r,c],[r,c+1]]:[[r,c],[r+1,c]];for(const k of roads){const [oo,aa,bb]=k.split(':'),rr=+aa,cc=+bb;const ee=oo==='H'?[[rr,cc],[rr,cc+1]]:[[rr,cc],[rr+1,cc]];if(ends.some(e=>ee.some(q=>q[0]===e[0]&&q[1]===e[1])))return true}return false}
 function parcelEdges(x){return ['N','W',...(x.r===CONFIG.height-1?['S']:[]),...(x.c===CONFIG.width-1?['E']:[])].map(side=>{const key=edgeKey(x.r,x.c,side),built=roads.has(key);return `<span class="parcelroad ${side} ${built?'built':mode==='road'?'available':'hiddenedge'}" data-edge="${key}" title="${built?'Road':'Build road'}"></span>`}).join('')}
@@ -122,11 +122,12 @@ function parcelClick(id){
  const p=players[turn];
  if(mode==='trade'&&!Number.isInteger(x.owner)){
   const cost=value(x);if(p.tokens<1||p.cash<cost)return alert('Not enough cash or ownership tokens.');
-  snap();x.owner=turn;p.tokens--;p.cash-=cost;p.owned.push(id);spendAction();
+  snap();x.owner=turn;p.tokens--;p.cash-=cost;p.owned.push(id);
+  if(tradeSalePending)tradeSalePending=false;else spendAction();
   logEvent(p.name+' bought '+id+' for '+cost+' dollars');render();return
  }
  if(mode==='trade'&&x.owner===turn){
-  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();
+  const sale=value(x);snap();p.cash+=sale;p.tokens++;p.owned=p.owned.filter(q=>q!==id);x.owner=null;spendAction();tradeSalePending=true;
   logEvent(p.name+' sold '+id+' for '+sale+' dollars');render();return
  }
  if(mode==='zone'&&x.owner===turn){selected=id;render()}
@@ -164,7 +165,7 @@ function buildingChoice(choice){
   c.coins=0;pendingBuilding=null;spendAction();render()
  }
 }
-function endTurn(){
+function endTurn(){tradeSalePending=false;
  if(setupDraft)return;
  botPlans[turn]=null;botFailedZones[turn].clear();botLastSold[turn]=null;
  const ending=players[turn].name;
