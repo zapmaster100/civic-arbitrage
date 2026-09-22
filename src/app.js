@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0921-58';
+const BUILD_ID='CA-0921-59';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='acquire',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null;
@@ -214,8 +214,8 @@ function chooseBotPlan(pi){
   const skip=i-(i<5?0:5);if(p.cash<skip)return;
   parcels.filter(x=>x.owner===pi&&!x.municipal).forEach(x=>{
    if(x.building){
-    const oldUse=x.buildingUse||x.zone,oldDensity=x.buildingDensity||1;
-    if(c.use!==oldUse||c.density<=oldDensity)return;
+    const oldDensity=x.buildingDensity||1;
+    if(c.density<=oldDensity)return;
    }
    if(botFailedZones[pi].has(botPlanKey(x,c.use,c.density)))return;
    // Higher-density buildings still need their opposite-use neighbour prerequisite.
@@ -277,6 +277,22 @@ function botRoadPlan(pi,plan){
   e=edges();if(e.length)buildRoad(e[0])
  }
  return true
+}
+function botSpeculativeZone(pi){
+ let best=null;
+ parcels.filter(x=>x.owner===pi&&!x.municipal).forEach(x=>{
+  for(const use of ['residential','commercial'])for(let density=1;density<=3;density++){
+   if(x.zone===use&&x.density>=density)continue;
+   if(density<=x.density)continue;
+   const support=pipSupport(x,use,density);if(support<6)continue;
+   const score=support*3+density*2+value(x);
+   if(!best||score>best.score)best={x,use,density,support,score};
+  }
+ });
+ if(!best)return false;
+ snap();best.x.zone=best.use;best.x.density=best.density;
+ logEvent(players[pi].name+' speculatively rezoned '+best.x.id+' to '+best.use+' '+('●'.repeat(best.density))+' — '+best.support+'/12 border support');
+ spendAction();render();return true
 }
 function botDiscard(pi){
  let best=-1,bestCoins=0;
@@ -347,6 +363,7 @@ function botAct(){
  }
  // If normal development is blocked, infrastructure should grow toward
  // ownership tokens that are stranded away from the road network.
+ if(botSpeculativeZone(pi))return true;
  if(botRoadTowardOwned(pi))return true;
  // If a token is still available, claim land rather than ending an empty turn.
  if(botAcquire(pi))return true;
