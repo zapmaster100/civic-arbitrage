@@ -48,7 +48,7 @@ function parcelPips(x){
  }
  return rails.join('')
 }
-function pipSupport(x,use,density){const code=pipCode(use,density);let total=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc);const nc=n&&!n.municipal?pipCode(n.zone,n.density):PIP_CODES.greenfield;total+=code.filter(p=>nc.includes(p)).length});return total}
+function pipSupport(x,use,density){const code=pipCode(use,density);let total=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc);const nc=n&&!n.municipal?pipCode(n.zone,n.density):PIP_CODES.greenfield;total+=code.filter(p=>nc.includes(p)).length});if(x.water)total+=code.length-code.filter(p=>PIP_CODES.greenfield.includes(p)).length;return total}
 function rulesContent(){return `
 <h2>Civic Arbitrage — Playas de México</h2>
 <p>Each player is a private developer shaping one shared growing city, but everyone is pursuing their own profit. Roads, zoning and buildings created by one player can increase the value and development potential of somebody else's land. Read where the city is going, secure the right parcels, and profit from the city your opponents create.</p>
@@ -60,10 +60,11 @@ function rulesContent(){return `
 <h3>2. Sell Parcel</h3>
 <p>Sell one of your parcels to the bank for its current land value and recover your ownership token. Zoning, buildings and roads remain, and the parcel becomes available to acquire again.</p>
 <h3>3. Build Road</h3>
-<p>Build up to <b>2 connected road segments</b> for $1 each. New roads must connect to the existing network. Roads are public and each road edge provides 1 frontage. A waterfront edge also provides 1 frontage.</p>
+<p>Build up to <b>2 connected road segments</b> for $1 each. New roads must connect to the existing network. Roads are public and each road edge provides 1 frontage. Water does not count as frontage.</p>
 <h3>4. Zone / Rezone</h3>
 <p>Choose one of your parcels and propose Residential or Commercial zoning at Low ●, Medium ●● or High ●●● density.</p>
 <p><b>Border support:</b> zoning tiles have six possible pip positions around their edges. Compare the proposed tile with its four orthogonal neighbours and count the pips that align. Same use + same density gives 3 matches; different use + same density gives 2; same use one density apart gives 2; different use one apart gives 1; same use two apart gives 1; different use two apart gives 0. Greenfield matches Low once and Medium/High zero times.</p>
+<p>A beachfront parcel treats its ocean boundary as <b>all six pip positions</b>, so the ocean fully supports any proposed private zoning pattern on that edge.</p>
 <p>Add all four borders. <b>6 or more matching pips permits the rezoning.</b> There is no Council draw or redraw.</p>
 <h3>5. Take Building</h3>
 <p>Choose a card from the building market. Pay $1 onto each occupied card you pass. When you take a card, you collect the subsidy already on it.</p>
@@ -90,7 +91,7 @@ function render(){
 function modeLabel(){return {acquire:'Acquire parcel',sell:'Sell parcel',road:'Build Road',zone:'Zone / Rezone',building:'Take Building'}[mode]}
 function help(){return {acquire:'Click any parcel not owned by a player. Existing private buildings do not block ownership. Municipal parcels cannot be owned. Pay current zoning/land value.',sell:'Click one of your parcels to sell it at current land value. Buildings and zoning remain.',road:'Place up to 2 connected public road segments for 1 action. Each segment costs $1. New roads must connect to the road network.',zone:'Click one of your parcels, then choose proposed zoning.',building:'Choose a card from either market row. Skip payments are automatic.'}[mode]}
 function zoneControls(){const x=parcels.find(q=>q.id===selected);return `<div class="zonecontrols"><p><b>Proposed zoning — border support</b></p>${['residential','commercial'].map(z=>`<div><b>${z}</b> ${[1,2,3].map(d=>{const support=pipSupport(x,z,d);return `<button data-zone="${z}" data-density="${d}" class="${support>=6?'zonepass':'zonefail'}">${'●'.repeat(d)} · ${support}/12 ${support>=6?'✓':'×'}</button>`}).join('')}</div>`).join('')}<p class="zonerule">6+ matching border pips = permitted.</p></div>`}
-function frontage(x){return ['N','S','E','W'].reduce((n,side)=>n+(roads.has(edgeKey(x.r,x.c,side))?1:0),0)+(x.water?1:0)}
+function frontage(x){return ['N','S','E','W'].reduce((n,side)=>n+(roads.has(edgeKey(x.r,x.c,side))?1:0),0)}
 function buildProblem(x,c){if(x.owner!==turn)return 'You do not own this parcel.';if(x.municipal)return 'Municipal land cannot take a private building.';if(x.building){const oldDensity=x.buildingDensity||1;if(c.density<=oldDensity)return `Redevelopment must increase density above the existing ${x.building} (${'●'.repeat(oldDensity)}).`;}if(x.zone!==c.use)return `Wrong zoning: this building requires ${c.use}.`;if(x.density<c.density)return `Zoning is too low: this building requires ${'●'.repeat(c.density)} density.`;if(frontage(x)<CONFIG.frontage[c.use][c.density])return `Not enough frontage: requires ${CONFIG.frontage[c.use][c.density]}, but this parcel has ${frontage(x)}.`;if(c.density>1){const needUse=c.use==='residential'?'commercial':'residential',needDensity=c.density-1;let found=false;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;const n=at(x.r+dr,x.c+dc);if(n&&n.building&&(n.buildingUse||n.zone)===needUse&&(n.buildingDensity||1)>=needDensity)found=true}if(!found)return `Missing nearby prerequisite: needs a built ${needUse} ${'●'.repeat(needDensity)} within the 8 surrounding parcels.`;}return null}
 function legalBuild(x,c){return !buildProblem(x,c)}
 function buildingControls(){const c=market[pendingBuilding];const legal=parcels.filter(x=>legalBuild(x,c));return `<div class="buildcontrols"><h3>Place ${c.name}</h3><p>${c.use} ${'●'.repeat(c.density)} · choose one of your parcels with matching zoning.</p><p>${legal.length?legal.map(x=>x.id).join(', ')+' highlighted on board.':'No legal parcel is currently available.'}</p><button data-buildchoice="discard">Discard for subsidy</button> <button data-buildchoice="cancel">Cancel</button></div>`}
