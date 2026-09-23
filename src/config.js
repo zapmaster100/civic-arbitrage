@@ -1,1 +1,1 @@
-export const CONFIG={width:12,height:7,actions:2,tokens:4,startCash:5,roadCost:1,buildPayout:5,growth:[4,9,15],frontage:{residential:[0,2,2,3],commercial:[0,2,3,4],municipal:[0,2,3,4]}};
+export const CONFIG={width:12,height:7,actions:2,tokens:4,startCash:10,roadCost:1,buildPayout:5,growth:[4,9,15],frontage:{residential:[0,2,2,3],commercial:[0,2,3,4],municipal:[0,2,3,4]}};
