@@ -102,11 +102,26 @@ function render(){
 }
 function modeLabel(){return {trade:'Sell / Buy',road:'Build Road',zone:'Zone / Rezone',building:'Take Building'}[mode]}
 function help(){return {trade:'Sell a parcel and then buy another as one action, or simply buy or sell once. Parcels trade at current land value; zoning and buildings remain.',road:'Place up to 2 connected public road segments for 1 action. Each segment costs $1. New roads must connect to the road network.',zone:'Click one of your parcels, then choose proposed zoning.',building:'Choose a card from either market row. Skip payments are automatic.'}[mode]}
-function zoneControls(){const x=parcels.find(q=>q.id===selected);return `<div class="zonecontrols"><p><b>Proposed zoning — border support</b></p>${['residential','commercial'].map(z=>`<div><b>${z}</b> ${[1,2,3].map(d=>{const support=pipSupport(x,z,d);return `<button data-zone="${z}" data-density="${d}" class="${support>=6?'zonepass':'zonefail'}">${'●'.repeat(d)} · ${support}/12 ${support>=6?'✓':'×'}</button>`}).join('')}</div>`).join('')}<p class="zonerule">6+ matching border pips = permitted.</p></div>`}
+function zoneControls(){const x=parcels.find(q=>q.id===selected);return `<div class="zonecontrols"><p><b>Proposed zoning — border support</b></p>${['residential','commercial','municipal'].map(z=>`<div><b>${z}</b> ${[1,2,3].map(d=>{const support=pipSupport(x,z,d);return `<button data-zone="${z}" data-density="${d}" class="${support>=6?'zonepass':'zonefail'}">${'●'.repeat(d)} · ${support}/12 ${support>=6?'✓':'×'}</button>`}).join('')}</div>`).join('')}<p class="zonerule">6+ matching border pips = permitted.</p></div>`}
 function frontage(x){return ['N','S','E','W'].reduce((n,side)=>n+(roads.has(edgeKey(x.r,x.c,side))?1:0),0)}
-function buildProblem(x,c){if(x.owner!==turn)return 'You do not own this parcel.';if(x.municipal)return 'Municipal land cannot take a private building.';if(x.building){const oldDensity=x.buildingDensity||1;if(c.density<=oldDensity)return `Redevelopment must increase density above the existing ${x.building} (${'●'.repeat(oldDensity)}).`;}if(x.zone!==c.use)return `Wrong zoning: this building requires ${c.use}.`;if(x.density<c.density)return `Zoning is too low: this building requires ${'●'.repeat(c.density)} density.`;if(frontage(x)<CONFIG.frontage[c.use][c.density])return `Not enough frontage: requires ${CONFIG.frontage[c.use][c.density]}, but this parcel has ${frontage(x)}.`;if(c.density>1){const needUse=c.use==='residential'?'commercial':'residential',needDensity=c.density-1;let found=false;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;const n=at(x.r+dr,x.c+dc);if(n&&n.building&&(n.buildingUse||n.zone)===needUse&&(n.buildingDensity||1)>=needDensity)found=true}if(!found)return `Missing nearby prerequisite: needs a built ${needUse} ${'●'.repeat(needDensity)} within the 8 surrounding parcels.`;}return null}
+function currentGrowthThreshold(){return CONFIG.growth.find(t=>population<t||jobs<t)||null}
+function growthBlocked(use){
+ const t=currentGrowthThreshold();if(!t)return false;
+ if(use==='residential')return population>=t&&jobs<t;
+ if(use==='commercial')return jobs>=t&&population<t;
+ return false
+}
+function checkGrowthUnlocks(){
+ while(municipalUnlocked<CONFIG.growth.length&&population>=CONFIG.growth[municipalUnlocked]&&jobs>=CONFIG.growth[municipalUnlocked]){
+  const card={...municipalDefs[municipalUnlocked]};
+  municipalQueue.push(card);
+  logEvent(card.name+' unlocked at '+CONFIG.growth[municipalUnlocked]+' Population / '+CONFIG.growth[municipalUnlocked]+' Jobs');
+  municipalUnlocked++;
+ }
+}
+function buildProblem(x,c){if(x.owner!==turn)return 'You do not own this parcel.';if(x.municipal)return 'This parcel is already permanent Municipal land.';if(c.municipalCard){if(x.zone!=='municipal')return 'Municipal zoning is required.';if(x.density<c.density)return 'Municipal zoning density is too low.';if(frontage(x)<CONFIG.frontage.municipal[c.density])return 'Not enough frontage for this Municipal building.';return null;}if(growthBlocked(c.use))return 'City growth is imbalanced: the other growth track must reach the current threshold before more '+c.use+' buildings can be constructed.';if(x.building){const oldDensity=x.buildingDensity||1;if(c.density<=oldDensity)return `Redevelopment must increase density above the existing ${x.building} (${'●'.repeat(oldDensity)}).`;}if(x.zone!==c.use)return `Wrong zoning: this building requires ${c.use}.`;if(x.density<c.density)return `Zoning is too low: this building requires ${'●'.repeat(c.density)} density.`;if(frontage(x)<CONFIG.frontage[c.use][c.density])return `Not enough frontage: requires ${CONFIG.frontage[c.use][c.density]}, but this parcel has ${frontage(x)}.`;if(c.density>1){const needUse=c.use==='residential'?'commercial':'residential',needDensity=c.density-1;let found=false;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;const n=at(x.r+dr,x.c+dc);if(n&&n.building&&(n.buildingUse||n.zone)===needUse&&(n.buildingDensity||1)>=needDensity)found=true}if(!found)return `Missing nearby prerequisite: needs a built ${needUse} ${'●'.repeat(needDensity)} within the 8 surrounding parcels.`;}return null}
 function legalBuild(x,c){return !buildProblem(x,c)}
-function buildingControls(){const c=market[pendingBuilding];const legal=parcels.filter(x=>legalBuild(x,c));return `<div class="buildcontrols"><h3>Place ${c.name}</h3><p>${c.use} ${'●'.repeat(c.density)} · choose one of your parcels with matching zoning.</p><p>${legal.length?legal.map(x=>x.id).join(', ')+' highlighted on board.':'No legal parcel is currently available.'}</p><button data-buildchoice="discard">Discard for subsidy</button> <button data-buildchoice="cancel">Cancel</button></div>`}
+function buildingControls(){const c=market[pendingBuilding];const legal=parcels.filter(x=>legalBuild(x,c));return `<div class="buildcontrols"><h3>Place ${c.name}</h3><p>${c.use} ${'●'.repeat(c.density)} · choose one of your parcels with matching zoning.</p><p>${legal.length?legal.map(x=>x.id).join(', ')+' highlighted on board.':'No legal parcel is currently available.'}</p>${c.municipalCard?'':'<button data-buildchoice="discard">Discard for subsidy</button> '}<button data-buildchoice="cancel">Cancel</button></div>`}
 function parcelClick(id){
  const x=parcels.find(q=>q.id===id);
  console.log('parcelClick',id,'draft',setupDraft,'pick',draftPick);
@@ -172,6 +187,7 @@ function buildingChoice(choice){
  if(pendingBuilding===null)return;
  if(choice==='cancel'){pendingBuilding=null;render();return}
  if(choice==='discard'){
+  if(market[pendingBuilding]?.municipalCard)return alert('Municipal buildings cannot be discarded.');
   const i=pendingBuilding,card=market[i],subsidy=card.coins,c=commitMarket(i);
   logEvent(players[turn].name+' discarded '+c.name+' for $'+subsidy+' subsidy');
   c.coins=0;pendingBuilding=null;spendAction();render()
