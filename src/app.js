@@ -29,11 +29,10 @@ function refreshMarket(){
  for(const start of [0,5]){
   const row=market.slice(start,start+5),kept=row.filter(Boolean);
   while(kept.length<5){
-   if(municipalShiftRows.includes(start)&&municipalQueue.length){
-    kept.push({...municipalQueue.shift(),id:nextCardId++});
-    municipalShiftRows=municipalShiftRows.filter(x=>x!==start);
-   } else kept.push(makeCard(refillDef()));
+   if(municipalShiftRows.includes(start)&&municipalQueue.length)kept.push({...municipalQueue.shift(),id:nextCardId++});
+   else kept.push(makeCard(refillDef()));
   }
+  municipalShiftRows=municipalShiftRows.filter(x=>x!==start);
   for(let j=0;j<5;j++)market[start+j]=kept[j]
  }
 }
