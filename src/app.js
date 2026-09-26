@@ -281,15 +281,16 @@ function chooseBotPlan(pi){
  const p=players[pi];let best=null;
  market.forEach((c,i)=>{
   if(!c)return;
+  if(!c.municipalCard&&growthBlocked(c.use))return;
   const skip=i-(i<5?0:5);if(p.cash<skip)return;
   parcels.filter(x=>x.owner===pi&&!x.municipal).forEach(x=>{
-   if(x.building){
+   if(x.building&&!c.municipalCard){
     const oldDensity=x.buildingDensity||1;
     if(c.density<=oldDensity)return;
    }
    if(botFailedZones[pi].has(botPlanKey(x,c.use,c.density)))return;
    // Higher-density buildings still need their opposite-use neighbour prerequisite.
-   if(c.density>1){
+   if(c.density>1&&!c.municipalCard){
     const needUse=c.use==='residential'?'commercial':'residential',needDensity=c.density-1;
     let found=false;
     for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
@@ -302,7 +303,7 @@ function chooseBotPlan(pi){
    const zoneNeeded=x.zone!==c.use||x.density<c.density;
    const yes=zoneNeeded?pipSupport(x,c.use,c.density):12;
    if(zoneNeeded&&yes<6)return;
-   const score=CONFIG.buildPayout+c.coins-skip+c.density*3-roadNeed*CONFIG.roadCost+(pi===0?value(x):0);
+   const score=(c.municipalCard?value(x):CONFIG.buildPayout)+c.coins-skip+c.density*3-roadNeed*CONFIG.roadCost+(pi===0?value(x):0);
    if(!best||score>best.score)best={parcelId:x.id,cardId:c.id,use:c.use,density:c.density,score}
   })
  });
@@ -366,7 +367,7 @@ function botSpeculativeZone(pi){
 }
 function botDiscard(pi){
  let best=-1,bestCoins=0;
- market.forEach((c,i)=>{if(!c)return;const skip=i-(i<5?0:5);if(c.coins-skip>bestCoins&&players[pi].cash>=skip){best=i;bestCoins=c.coins-skip}});
+ market.forEach((c,i)=>{if(!c||c.municipalCard)return;const skip=i-(i<5?0:5);if(c.coins-skip>bestCoins&&players[pi].cash>=skip){best=i;bestCoins=c.coins-skip}});
  if(best<0)return false;
  mode='building';pendingBuilding=best;buildingChoice('discard');return true
 }
