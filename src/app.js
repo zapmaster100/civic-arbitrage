@@ -27,9 +27,9 @@ let market=defs.map((d,i)=>({id:i,name:d[0],use:d[1],density:d[2],coins:0}));
 function refillDef(){return defs[Math.floor(Math.random()*defs.length)]}
 function refreshMarket(){
  for(const start of [0,5]){
-  const row=market.slice(start,start+5),kept=row.filter(Boolean);
+  const row=market.slice(start,start+5),kept=row.filter(Boolean);let municipalInserted=false;
   while(kept.length<5){
-   if(municipalShiftRows.includes(start)&&municipalQueue.length)kept.push({...municipalQueue.shift(),id:nextCardId++});
+   if(!municipalInserted&&municipalShiftRows.includes(start)&&municipalQueue.length){kept.push({...municipalQueue.shift(),id:nextCardId++});municipalInserted=true;}
    else kept.push(makeCard(refillDef()));
   }
   municipalShiftRows=municipalShiftRows.filter(x=>x!==start);
