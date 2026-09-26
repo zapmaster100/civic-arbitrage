@@ -175,12 +175,29 @@ function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)r
 function councilControls(){return ''}
 function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
 function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function finishGame(){
+ gameOver=true;actions=0;
+ const totals=players.map(p=>({name:p.name,total:p.cash+parcels.filter(x=>x.owner===p.i).reduce((s,x)=>s+value(x),0)})).sort((a,b)=>b.total-a.total);
+ logEvent('GAME OVER — '+totals.map(x=>x.name+' '+x.total+' dollars').join(' · '));
+}
 function placeBuilding(x){
  const i=pendingBuilding,c=commitMarket(i),p=players[turn],subsidy=c.coins;
+ if(c.municipalCard){
+  const buyout=value(x);
+  p.cash+=buyout;
+  p.tokens++;
+  p.owned=p.owned.filter(id=>id!==x.id);
+  x.owner=null;x.zone='municipal';x.density=c.density;x.building=c.name;x.buildingUse='municipal';x.buildingDensity=c.density;x.municipal=true;
+  logEvent(p.name+' built '+c.name+' on '+x.id+' — city bought parcel for '+buyout+' dollars');
+  c.coins=0;pendingBuilding=null;spendAction();
+  if(c.final)finishGame();
+  render();return
+ }
  if(x.building)x.building=null;
  x.building=c.name;x.buildingUse=c.use;x.buildingDensity=c.density;p.cash+=CONFIG.buildPayout;
  if(c.use==='residential')population+=c.density;else if(c.use==='commercial')jobs+=c.density;
- logEvent(p.name+' built '+c.name+' on '+x.id+' (+$'+CONFIG.buildPayout+(subsidy?' + $'+subsidy+' subsidy':'')+')');
+ logEvent(p.name+' built '+c.name+' on '+x.id+' (+'+CONFIG.buildPayout+' dollars'+(subsidy?' + '+subsidy+' subsidy':'')+')');
+ checkGrowthUnlocks();
  c.coins=0;pendingBuilding=null;spendAction();render()
 }
 function buildingChoice(choice){
@@ -194,7 +211,7 @@ function buildingChoice(choice){
  }
 }
 function endTurn(){tradeSalePending=false;
- if(setupDraft)return;
+ if(setupDraft||gameOver)return;
  botPlans[turn]=null;botFailedZones[turn].clear();botLastSold[turn]=null;
  const ending=players[turn].name;
  if(actionStart)actionStart=null;
@@ -458,7 +475,7 @@ function botAct(){
  return false
 }
 function botTurn(){
- if(setupDraft||!players[turn].bot)return;
+ if(setupDraft||gameOver||!players[turn].bot)return;
  let guard=0;
  function step(){
   if(!players[turn].bot)return;
