@@ -2,7 +2,7 @@ import {CONFIG} from './config.js';
 const BUILD_ID='CA-0925-70';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
-let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false,municipalQueue=[],municipalUnlocked=0,gameOver=false;
+let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false,municipalQueue=[],municipalUnlocked=0,municipalShiftRows=[],gameOver=false;
 const draftOrder=[0,1,2,3,3,2,1,0], rows='ABCDEFG'.split('');
 const parcels=[], roads=new Set(), history=[];
 const gameLog=[];
@@ -27,10 +27,12 @@ let market=defs.map((d,i)=>({id:i,name:d[0],use:d[1],density:d[2],coins:0}));
 function refillDef(){return defs[Math.floor(Math.random()*defs.length)]}
 function refreshMarket(){
  for(const start of [0,5]){
-  const row=market.slice(start,start+5),hadHole=row.some(x=>!x),kept=row.filter(Boolean);
+  const row=market.slice(start,start+5),kept=row.filter(Boolean);
   while(kept.length<5){
-   if(hadHole&&municipalQueue.length)kept.push({...municipalQueue.shift(),id:nextCardId++});
-   else kept.push(makeCard(refillDef()));
+   if(municipalShiftRows.includes(start)&&municipalQueue.length){
+    kept.push({...municipalQueue.shift(),id:nextCardId++});
+    municipalShiftRows=municipalShiftRows.filter(x=>x!==start);
+   } else kept.push(makeCard(refillDef()));
   }
   for(let j=0;j<5;j++)market[start+j]=kept[j]
  }
@@ -38,8 +40,8 @@ function refreshMarket(){
 
 function at(r,c){return parcels.find(x=>x.r===r&&x.c===c)}
 function value(p){let v=p.density;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(p.r+dr,p.c+dc);if(n)v+=n.density});if(p.water)v+=p.density;return v}
-function state(){return JSON.stringify({players,turn,actions,mode,selected,population,jobs,setupDraft,draftPick,parcels,roads:[...roads],market,municipalQueue,municipalUnlocked,gameOver})}
-function restore(raw){const q=JSON.parse(raw);players.splice(0,players.length,...q.players);turn=q.turn;actions=q.actions;mode=q.mode;selected=q.selected;population=q.population;jobs=q.jobs;setupDraft=q.setupDraft;draftPick=q.draftPick;parcels.splice(0,parcels.length,...q.parcels);roads.clear();q.roads.forEach(x=>roads.add(x));market=q.market;municipalQueue=q.municipalQueue||[];municipalUnlocked=q.municipalUnlocked||0;gameOver=!!q.gameOver;pendingBuilding=null;pendingCouncil=null;roadSegments=0}
+function state(){return JSON.stringify({players,turn,actions,mode,selected,population,jobs,setupDraft,draftPick,parcels,roads:[...roads],market,municipalQueue,municipalUnlocked,municipalShiftRows,gameOver})}
+function restore(raw){const q=JSON.parse(raw);players.splice(0,players.length,...q.players);turn=q.turn;actions=q.actions;mode=q.mode;selected=q.selected;population=q.population;jobs=q.jobs;setupDraft=q.setupDraft;draftPick=q.draftPick;parcels.splice(0,parcels.length,...q.parcels);roads.clear();q.roads.forEach(x=>roads.add(x));market=q.market;municipalQueue=q.municipalQueue||[];municipalUnlocked=q.municipalUnlocked||0;municipalShiftRows=q.municipalShiftRows||[];gameOver=!!q.gameOver;pendingBuilding=null;pendingCouncil=null;roadSegments=0}
 function snap(){try{history.push(state())}catch(e){console.error('Snapshot failed',e)}}
 function undo(){if(actionStart){restore(actionStart);actionStart=null;if(history.length)history.pop();render();return}if(!history.length)return;restore(history.pop());render()}
 function spendAction(){actions--}
@@ -174,7 +176,7 @@ function councilOdds(x,use,density){let yes=0;[[1,0],[-1,0],[0,1],[0,-1]].forEac
 function applyZone(use,density){const x=parcels.find(q=>q.id===selected);if(!x)return;const support=pipSupport(x,use,density);if(support<6)return alert('Not permitted: '+support+'/12 border support. 6 is required.');snap();x.zone=use;x.density=density;spendAction();logEvent(players[turn].name+' rezoned '+x.id+' to '+use+' '+('●'.repeat(density))+' — '+support+'/12 border support');selected=null;pendingCouncil=null;actionStart=null;render()}
 function councilControls(){return ''}
 function takeCard(i){if(mode!=='building'||actions<=0||setupDraft||pendingBuilding!==null)return;const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart;if(p.cash<pos)return alert('Not enough cash to pay the market skip cost.');pendingBuilding=i;render()}
-function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;return c}
+function commitMarket(i){const p=players[turn],rowStart=i<5?0:5,pos=i-rowStart,c=market[i];snap();for(let j=rowStart;j<i;j++)if(market[j])market[j].coins++;p.cash-=pos;p.cash+=c.coins;market[i]=null;if(!c.municipalCard&&!municipalShiftRows.includes(rowStart))municipalShiftRows.push(rowStart);return c}
 function finishGame(){
  gameOver=true;actions=0;
  const totals=players.map(p=>({name:p.name,total:p.cash+parcels.filter(x=>x.owner===p.i).reduce((s,x)=>s+value(x),0)})).sort((a,b)=>b.total-a.total);
