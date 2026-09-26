@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0925-70';
+const BUILD_ID='CA-0926-71';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false,municipalQueue=[],municipalUnlocked=0,municipalShiftRows=[],gameOver=false;
@@ -367,8 +367,16 @@ function botSpeculativeZone(pi){
  spendAction();render();return true
 }
 function botDiscard(pi){
- let best=-1,bestCoins=0;
- market.forEach((c,i)=>{if(!c||c.municipalCard)return;const skip=i-(i<5?0:5);if(c.coins-skip>bestCoins&&players[pi].cash>=skip){best=i;bestCoins=c.coins-skip}});
+ let best=-1,bestScore=0;
+ market.forEach((c,i)=>{
+  if(!c||c.municipalCard)return;
+  const skip=i-(i<5?0:5);if(players[pi].cash<skip)return;
+  const net=c.coins-skip,blocked=growthBlocked(c.use);
+  // Normally discard only for a profitable subsidy. During a growth freeze,
+  // clear blocked cards even at zero net value so the market cannot stall.
+  const score=blocked?(100-skip*5+c.coins):net;
+  if((blocked||net>0)&&score>bestScore){best=i;bestScore=score}
+ });
  if(best<0)return false;
  mode='building';pendingBuilding=best;buildingChoice('discard');return true
 }
