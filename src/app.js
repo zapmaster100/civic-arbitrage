@@ -1,8 +1,8 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0922-69';
+const BUILD_ID='CA-0925-70';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
-let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false;
+let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false,municipalQueue=[],municipalUnlocked=0,gameOver=false;
 const draftOrder=[0,1,2,3,3,2,1,0], rows='ABCDEFG'.split('');
 const parcels=[], roads=new Set(), history=[];
 const gameLog=[];
@@ -15,17 +15,31 @@ seed(0,5,'residential','Casa'); seed(2,5,'residential','Casa'); seed(1,4,'commer
 seed(6,5,'residential','Surf Shack'); // directly south of Plaza on the coast
 ['H:1:5','H:2:5','V:1:5','V:1:6'].forEach(k=>roads.add(k));
 
+const municipalDefs=[
+ {name:'Mercado Municipal',use:'municipal',density:1,coins:0,municipalCard:true},
+ {name:'Ayuntamiento',use:'municipal',density:2,coins:0,municipalCard:true},
+ {name:'Edificio Municipal',use:'municipal',density:3,coins:0,municipalCard:true,final:true}
+];
 const defs=[['Casa','residential',1],['Café','commercial',1],['Casa','residential',1],['Apartamentos','residential',2],['Tiendas','commercial',2],['Café','commercial',1],['Casa','residential',1],['Hotel','commercial',3],['Apartamentos','residential',2],['Tiendas','commercial',2]];
 let nextCardId=defs.length;
 function makeCard(d){return {id:nextCardId++,name:d[0],use:d[1],density:d[2],coins:0}}
 let market=defs.map((d,i)=>({id:i,name:d[0],use:d[1],density:d[2],coins:0}));
 function refillDef(){return defs[Math.floor(Math.random()*defs.length)]}
-function refreshMarket(){for(const start of [0,5]){const row=market.slice(start,start+5),kept=row.filter(Boolean);while(kept.length<5)kept.push(makeCard(refillDef()));for(let j=0;j<5;j++)market[start+j]=kept[j]}}
+function refreshMarket(){
+ for(const start of [0,5]){
+  const row=market.slice(start,start+5),hadHole=row.some(x=>!x),kept=row.filter(Boolean);
+  while(kept.length<5){
+   if(hadHole&&municipalQueue.length)kept.push({...municipalQueue.shift(),id:nextCardId++});
+   else kept.push(makeCard(refillDef()));
+  }
+  for(let j=0;j<5;j++)market[start+j]=kept[j]
+ }
+}
 
 function at(r,c){return parcels.find(x=>x.r===r&&x.c===c)}
 function value(p){let v=p.density;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(p.r+dr,p.c+dc);if(n)v+=n.density});if(p.water)v+=p.density;return v}
-function state(){return JSON.stringify({players,turn,actions,mode,selected,population,jobs,setupDraft,draftPick,parcels,roads:[...roads],market})}
-function restore(raw){const q=JSON.parse(raw);players.splice(0,players.length,...q.players);turn=q.turn;actions=q.actions;mode=q.mode;selected=q.selected;population=q.population;jobs=q.jobs;setupDraft=q.setupDraft;draftPick=q.draftPick;parcels.splice(0,parcels.length,...q.parcels);roads.clear();q.roads.forEach(x=>roads.add(x));market=q.market;pendingBuilding=null;pendingCouncil=null;roadSegments=0}
+function state(){return JSON.stringify({players,turn,actions,mode,selected,population,jobs,setupDraft,draftPick,parcels,roads:[...roads],market,municipalQueue,municipalUnlocked,gameOver})}
+function restore(raw){const q=JSON.parse(raw);players.splice(0,players.length,...q.players);turn=q.turn;actions=q.actions;mode=q.mode;selected=q.selected;population=q.population;jobs=q.jobs;setupDraft=q.setupDraft;draftPick=q.draftPick;parcels.splice(0,parcels.length,...q.parcels);roads.clear();q.roads.forEach(x=>roads.add(x));market=q.market;municipalQueue=q.municipalQueue||[];municipalUnlocked=q.municipalUnlocked||0;gameOver=!!q.gameOver;pendingBuilding=null;pendingCouncil=null;roadSegments=0}
 function snap(){try{history.push(state())}catch(e){console.error('Snapshot failed',e)}}
 function undo(){if(actionStart){restore(actionStart);actionStart=null;if(history.length)history.pop();render();return}if(!history.length)return;restore(history.pop());render()}
 function spendAction(){actions--}
@@ -33,22 +47,21 @@ function setMode(m){if(setupDraft||actions<=0)return;actionStart=null;tradeSaleP
 function edgeKey(r,c,side){if(side==='N')return 'H:'+r+':'+c;if(side==='S')return 'H:'+(r+1)+':'+c;if(side==='W')return 'V:'+r+':'+c;return 'V:'+r+':'+(c+1)}
 function edgeConnected(key){if(!roads.size)return true;const [o,a,b]=key.split(':'),r=+a,c=+b;const ends=o==='H'?[[r,c],[r,c+1]]:[[r,c],[r+1,c]];for(const k of roads){const [oo,aa,bb]=k.split(':'),rr=+aa,cc=+bb;const ee=oo==='H'?[[rr,cc],[rr,cc+1]]:[[rr,cc],[rr+1,cc]];if(ends.some(e=>ee.some(q=>q[0]===e[0]&&q[1]===e[1])))return true}return false}
 function parcelEdges(x){return ['N','W',...(x.r===CONFIG.height-1?['S']:[]),...(x.c===CONFIG.width-1?['E']:[])].map(side=>{const key=edgeKey(x.r,x.c,side),built=roads.has(key);return `<span class="parcelroad ${side} ${built?'built':mode==='road'?'available':'hiddenedge'}" data-edge="${key}" title="${built?'Road':'Build road'}"></span>`}).join('')}
-const PIP_CODES={greenfield:[3],residential:{1:[1,2,3],2:[1,2,4],3:[1,4,5]},commercial:{1:[2,3,6],2:[2,4,6],3:[4,5,6]}};
+const PIP_CODES={greenfield:[3],residential:{1:[1,2,3],2:[1,2,4],3:[1,4,5]},commercial:{1:[2,3,6],2:[2,4,6],3:[4,5,6]},municipal:{1:[2,3],2:[2,4],3:[4,5]}};
 function pipCode(use,density){if(use==='greenfield'||!density)return PIP_CODES.greenfield;return PIP_CODES[use]?.[density]||[]}
 function pipRail(code,side){return `<span class="piprail ${side}">${[1,2,3,4,5,6].map(i=>`<i class="pippos p${i} ${code.includes(i)?'on':''}"></i>`).join('')}</span>`}
 function parcelPips(x){
- if(x.municipal)return '';
  const own=pipCode(x.zone,x.density),rails=[];
  // Render each shared boundary only once: north and west sides.
  // Each boundary contains both neighbours' pip codes separated across the seam.
  const boundaries=[['N',at(x.r-1,x.c)],['W',at(x.r,x.c-1)]];
  for(const [side,n] of boundaries){
-  const other=n&&!n.municipal?pipCode(n.zone,n.density):PIP_CODES.greenfield;
+  const other=n?pipCode(n.zone,n.density):PIP_CODES.greenfield;
   rails.push(`<span class="pipboundary ${side}"><span class="piphalf other">${[1,2,3,4,5,6].map(i=>`<i class="${other.includes(i)?'on':''}"></i>`).join('')}</span><span class="piphalf own">${[1,2,3,4,5,6].map(i=>`<i class="${own.includes(i)?'on':''}"></i>`).join('')}</span></span>`);
  }
  return rails.join('')
 }
-function pipSupport(x,use,density){const code=pipCode(use,density);let total=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc);const nc=n&&!n.municipal?pipCode(n.zone,n.density):PIP_CODES.greenfield;total+=code.filter(p=>nc.includes(p)).length});if(x.water)total+=code.length-code.filter(p=>PIP_CODES.greenfield.includes(p)).length;return total}
+function pipSupport(x,use,density){const code=pipCode(use,density);let total=0;[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const n=at(x.r+dr,x.c+dc);const nc=n?pipCode(n.zone,n.density):PIP_CODES.greenfield;total+=code.filter(p=>nc.includes(p)).length});if(x.water)total+=code.length-code.filter(p=>PIP_CODES.greenfield.includes(p)).length;return total}
 function rulesContent(){return `
 <h2>Civic Arbitrage — Playas de México</h2>
 <p>Each player is a private developer shaping one shared growing city, but everyone is pursuing their own profit. Roads, zoning and buildings created by one player can increase the value and development potential of somebody else's land. Read where the city is going, secure the right parcels, and profit from the city your opponents create.</p>
