@@ -12,8 +12,8 @@ for(let r=0;r<CONFIG.height;r++)for(let c=0;c<CONFIG.width;c++)parcels.push({id:
 const plaza={r:1,c:5};
 function seed(r,c,zone,building,municipal=false){const p=at(r,c);p.zone=zone;p.density=1;p.building=building;p.buildingUse=zone;p.buildingDensity=1;p.municipal=municipal;}
 seed(2,3,'residential','Casa'); seed(4,3,'residential','Casa'); seed(3,2,'commercial','Café'); seed(3,4,'commercial','Café'); seed(3,3,'municipal','Plaza Mayor',true);
-seed(6,5,'residential','Surf Shack'); // directly south of Plaza on the coast
-['H:1:5','H:2:5','V:1:5','V:1:6'].forEach(k=>roads.add(k));
+seed(10,3,'residential','Surf Shack'); // directly south of Plaza on the coast
+['H:3:3','H:4:3','V:3:3','V:3:4'].forEach(k=>roads.add(k));
 
 const municipalDefs=[
  {name:'Mercado Municipal',use:'municipal',density:1,coins:0,municipalCard:true},
