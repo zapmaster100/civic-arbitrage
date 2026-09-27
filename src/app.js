@@ -1,15 +1,15 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0927-74';
+const BUILD_ID='CA-0927-75';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false,municipalQueue=[],municipalUnlocked=0,municipalShiftRows=[],gameOver=false;
-const draftOrder=[0,1,2,3,3,2,1,0], rows='ABCDEFG'.split('');
+const draftOrder=[0,1,2,3,3,2,1,0], rows='ABCDEFGHIJK'.split('');
 const parcels=[], roads=new Set(), history=[];
 const gameLog=[];
 const botPlans=[null,null,null,null],botFailedZones=[new Set(),new Set(),new Set(),new Set()],botLastSold=[null,null,null,null];
 function logEvent(msg){gameLog.push(msg);if(gameLog.length>50)gameLog.shift();}
-for(let r=0;r<CONFIG.height;r++)for(let c=0;c<CONFIG.width;c++)parcels.push({id:rows[r]+(c+1),r,c,owner:null,zone:'greenfield',density:0,building:null,water:r===6,municipal:false});
-const plaza={r:1,c:5};
+for(let r=0;r<CONFIG.height;r++)for(let c=0;c<CONFIG.width;c++)parcels.push({id:rows[r]+(c+1),r,c,owner:null,zone:'greenfield',density:0,building:null,water:r===CONFIG.height-1,municipal:false});
+const plaza={r:3,c:3};
 function seed(r,c,zone,building,municipal=false){const p=at(r,c);p.zone=zone;p.density=1;p.building=building;p.buildingUse=zone;p.buildingDensity=1;p.municipal=municipal;}
 seed(2,3,'residential','Casa'); seed(4,3,'residential','Casa'); seed(3,2,'commercial','Café'); seed(3,4,'commercial','Café'); seed(3,3,'municipal','Plaza Mayor',true);
 seed(10,3,'residential','Surf Shack'); // directly south of Plaza on the coast
