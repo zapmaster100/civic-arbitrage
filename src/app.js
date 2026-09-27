@@ -1,8 +1,8 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0927-76';
+const BUILD_ID='CA-0927-77';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
-let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false,municipalQueue=[],municipalUnlocked=0,municipalShiftRows=[],gameOver=false;
+let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=2,jobs=2,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false,municipalQueue=[],municipalUnlocked=0,municipalShiftRows=[],gameOver=false;
 const draftOrder=[0,1,2,3,3,2,1,0], rows='ABCDEFGHIJK'.split('');
 const parcels=[], roads=new Set(), history=[];
 const gameLog=[];
