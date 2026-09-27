@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0926-71';
+const BUILD_ID='CA-0927-72';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false,municipalQueue=[],municipalUnlocked=0,municipalShiftRows=[],gameOver=false;
@@ -240,13 +240,17 @@ function botRoadDistance(x){
 }
 function botScoreParcel(x,pi){
  const roadDist=botRoadDistance(x);
- let score=value(x)*3+(x.water?4:0);
- // Infrastructure matters: frontage is best, nearby speculation is viable,
- // but remote land must be unusually valuable to justify tying up a token.
+ // Waterfront is valuable, but bots should develop TOWARD it rather than
+ // teleport ownership tokens onto an isolated beach.
+ let score=value(x)*3+(x.water?7:0);
  if(roadDist===0)score+=9;
- else if(roadDist===1)score+=5;
- else if(roadDist===2)score+=1;
- else score-=(roadDist-2)*4;
+ else if(roadDist===1)score+=6;
+ else if(roadDist===2)score+=3;
+ else score-=(roadDist-2)*2;
+ // Parcels on the southward development frontier get some of the coast's
+ // future value. This makes intermediate land useful as a corridor.
+ const coastSteps=Math.max(0,(CONFIG.height-1)-x.r);
+ score+=Math.max(0,4-coastSteps);
  for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
   if(!dr&&!dc)continue;
   const n=at(x.r+dr,x.c+dc);if(n&&n.building)score+=2
@@ -304,7 +308,9 @@ function chooseBotPlan(pi){
    const zoneNeeded=x.zone!==c.use||x.density<c.density;
    const yes=zoneNeeded?pipSupport(x,c.use,c.density):12;
    if(zoneNeeded&&yes<6)return;
-   const score=(c.municipalCard?value(x):CONFIG.buildPayout)+c.coins-skip+c.density*3-roadNeed*CONFIG.roadCost+(pi===0?value(x):0);
+   const coastEquity=x.water&&!c.municipalCard?c.density*2:0;
+   const coastSupport=x.water&&zoneNeeded?2:0;
+   const score=(c.municipalCard?value(x):CONFIG.buildPayout)+c.coins-skip+c.density*3-roadNeed*CONFIG.roadCost+coastEquity+coastSupport+(pi===0?value(x):0);
    if(!best||score>best.score)best={parcelId:x.id,cardId:c.id,use:c.use,density:c.density,score}
   })
  });
