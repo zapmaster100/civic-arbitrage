@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0927-75';
+const BUILD_ID='CA-0927-76';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=0,jobs=0,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false,municipalQueue=[],municipalUnlocked=0,municipalShiftRows=[],gameOver=false;
@@ -485,9 +485,13 @@ function botAct(){
  if(botDiscard(pi))return true;
  // With all tokens committed, relocate one only when a clearly better parcel is available.
  if(botStrategicSwap(pi))return true;
- // Holding land is better than meaningless buy/sell churn. A bot with no
- // productive action simply ends its turn; selling is reserved for explicit
- // strategic needs rather than being a generic fallback.
+ // Holding land is better than meaningless buy/sell churn. Log the state
+ // when a bot has no productive action so playtests can distinguish a rational
+ // pass from an AI blind spot without changing strategy.
+ const bp=players[pi],ownedCount=parcels.filter(x=>x.owner===pi).length;
+ const legalMarket=market.filter(c=>c&&parcels.some(x=>{const oldTurn=turn;turn=pi;const ok=legalBuild(x,c);turn=oldTurn;return ok})).length;
+ const affordableLand=parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner)&&value(x)<=bp.cash).length;
+ logEvent(bp.name+' PASS — '+ownedCount+'/'+CONFIG.tokens+' tokens used · '+bp.cash+' dollars cash · '+legalMarket+' legal market cards · '+affordableLand+' affordable open parcels · no productive AI action');
  return false
 }
 function botTurn(){
