@@ -11,7 +11,7 @@ function logEvent(msg){gameLog.push(msg);if(gameLog.length>50)gameLog.shift();}
 for(let r=0;r<CONFIG.height;r++)for(let c=0;c<CONFIG.width;c++)parcels.push({id:rows[r]+(c+1),r,c,owner:null,zone:'greenfield',density:0,building:null,water:r===6,municipal:false});
 const plaza={r:1,c:5};
 function seed(r,c,zone,building,municipal=false){const p=at(r,c);p.zone=zone;p.density=1;p.building=building;p.buildingUse=zone;p.buildingDensity=1;p.municipal=municipal;}
-seed(0,5,'residential','Casa'); seed(2,5,'residential','Casa'); seed(1,4,'commercial','Café'); seed(1,6,'commercial','Café'); seed(1,5,'municipal','Plaza Mayor',true);
+seed(2,3,'residential','Casa'); seed(4,3,'residential','Casa'); seed(3,2,'commercial','Café'); seed(3,4,'commercial','Café'); seed(3,3,'municipal','Plaza Mayor',true);
 seed(6,5,'residential','Surf Shack'); // directly south of Plaza on the coast
 ['H:1:5','H:2:5','V:1:5','V:1:6'].forEach(k=>roads.add(k));
 
