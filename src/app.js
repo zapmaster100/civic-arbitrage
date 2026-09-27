@@ -1,5 +1,5 @@
 import {CONFIG} from './config.js';
-const BUILD_ID='CA-0927-78';
+const BUILD_ID='CA-0927-79';
 
 const players=['Blue','Red','Yellow','White'].map((name,i)=>({name,cash:CONFIG.startCash,tokens:CONFIG.tokens,owned:[],i,bot:i!==2}));
 let turn=0,actions=CONFIG.actions,mode='trade',selected=null,population=2,jobs=2,setupDraft=true,draftPick=0,pendingBuilding=null,roadSegments=0,actionStart=null,pendingCouncil=null,tradeSalePending=false,municipalQueue=[],municipalUnlocked=0,municipalShiftRows=[],gameOver=false;
@@ -433,30 +433,62 @@ function botAcquire(pi){
 }
 function botStrategicSwap(pi){
  const p=players[pi];
- // Sell only when a clearly better destination has already been identified.
- // Sell + Buy is now one action, so this can be used with one action remaining.
  if(p.tokens>0||actions<1)return false;
  const owned=parcels.filter(x=>x.owner===pi&&!x.municipal);
  if(!owned.length)return false;
  let best=null;
+ // Evaluate a swap by the DEVELOPMENT it unlocks, not just raw parcel value.
+ // A mature holding can be worth selling when a new parcel creates a legal
+ // zoning/building path from the current market.
  for(const target of parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner))){
-  const targetValue=value(target),targetScore=botScoreParcel(target,pi);
+  const targetValue=value(target);
   for(const sold of owned){
    if(target.id===botLastSold[pi])continue;
    const saleValue=value(sold);
    if(p.cash+saleValue<targetValue)continue;
-   const soldScore=botScoreParcel(sold,pi);
-   if(targetScore<soldScore+4)continue;
-   const gain=targetScore-soldScore;
-   if(!best||gain>best.gain)best={sold,target,gain};
+   for(const c of market){
+    if(!c||(!c.municipalCard&&growthBlocked(c.use)))continue;
+    const i=market.indexOf(c),skip=i-(i<5?0:5);
+    if(p.cash+saleValue-targetValue<skip)continue;
+    if(target.building&&!c.municipalCard&&(c.density<=(target.buildingDensity||1)))continue;
+    if(c.density>1&&!c.municipalCard){
+     const needUse=c.use==='residential'?'commercial':'residential',needDensity=c.density-1;
+     let found=false;
+     for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+      if(!dr&&!dc)continue;const n=at(target.r+dr,target.c+dc);
+      if(n&&n.building&&(n.buildingUse||n.zone)===needUse&&(n.buildingDensity||1)>=needDensity)found=true
+     }
+     if(!found)continue;
+    }
+    const zoneNeeded=target.zone!==c.use||target.density<c.density;
+    const support=zoneNeeded?pipSupport(target,c.use,c.density):12;
+    if(zoneNeeded&&support<6)continue;
+    const roadNeed=Math.max(0,CONFIG.frontage[c.use][c.density]-frontage(target));
+    const development=(c.municipalCard?value(target):CONFIG.buildPayout)+c.coins-skip+c.density*3-roadNeed*CONFIG.roadCost+(target.water&&!c.municipalCard?c.density*2:0);
+    // Keep some respect for the value being surrendered, but don't require
+    // the empty destination parcel itself to be +4 better.
+    const score=development+botScoreParcel(target,pi)*0.15-botScoreParcel(sold,pi)*0.1;
+    if(!best||score>best.score)best={sold,target,score};
+   }
+  }
+ }
+ // If no market-driven development path exists, retain the old conservative
+ // parcel-for-parcel swap test.
+ if(!best){
+  for(const target of parcels.filter(x=>!x.municipal&&!Number.isInteger(x.owner))){
+   const targetValue=value(target),targetScore=botScoreParcel(target,pi);
+   for(const sold of owned){
+    if(target.id===botLastSold[pi])continue;
+    const saleValue=value(sold);if(p.cash+saleValue<targetValue)continue;
+    const soldScore=botScoreParcel(sold,pi);if(targetScore<soldScore+4)continue;
+    const score=targetScore-soldScore;if(!best||score>best.score)best={sold,target,score};
+   }
   }
  }
  if(!best)return false;
  botLastSold[pi]=best.sold.id;
  mode='trade';parcelClick(best.sold.id);
- if(tradeSalePending&&p.tokens>0&&value(best.target)<=p.cash&&!Number.isInteger(best.target.owner)){
-  parcelClick(best.target.id);
- }
+ if(tradeSalePending&&p.tokens>0&&value(best.target)<=p.cash&&!Number.isInteger(best.target.owner))parcelClick(best.target.id);
  return true
 }
 function botSell(pi){
